@@ -55,10 +55,22 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/epub_packager.py document.md
     --figures figures/ \
     --title "Document Title" \
     --author "Author Name" \
-    --lang en
+    --lang en \
+    --split-mode auto
+```
+
+### 3. `verify_fidelity.py` (Line-by-Line Quality & Fidelity Verifier)
+```bash
+# Run line-by-line verification after each build / turn
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/verify_fidelity.py \
+    --pdf document.pdf \
+    --epub book.epub \
+    --threshold 95.0 \
+    --verbose
 ```
 
 ---
+
 
 ## End-to-End Execution Protocol
 

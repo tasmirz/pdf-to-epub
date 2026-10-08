@@ -111,6 +111,14 @@ def main():
     p_pkg.add_argument("--author", default="Unknown Author", help="Author name")
     p_pkg.add_argument("--lang", default="en", help="Language code")
 
+    # verify
+    p_ver = subparsers.add_parser("verify", help="Run line-by-line fidelity and quality verification on EPUB against source PDF")
+    p_ver.add_argument("--pdf", required=True, help="Path to source PDF")
+    p_ver.add_argument("--epub", required=True, help="Path to generated EPUB")
+    p_ver.add_argument("--threshold", type=float, default=95.0, help="Required sentence coverage percentage (default: 95.0)")
+    p_ver.add_argument("--verbose", action="store_true", help="Print detailed unmatched sentences and debug info")
+    p_ver.add_argument("--json", help="Save output report as JSON file")
+
     # install-skill
     subparsers.add_parser("install-skill", help="Install/link into Antigravity global skills directory")
 
@@ -130,8 +138,17 @@ def main():
     elif args.subcommand == "package":
         from epub_packager import build_epub3
         build_epub3(args.markdown, args.output, figures_dir=args.figures, title=args.title, author=args.author, lang=args.lang)
+    elif args.subcommand == "verify":
+        from verify_fidelity import run_verification, print_cli_report
+        report = run_verification(args.pdf, args.epub, threshold=args.threshold, verbose=args.verbose)
+        if args.json:
+            import json
+            Path(args.json).write_text(json.dumps(report, indent=2), encoding="utf-8")
+        print_cli_report(report, verbose=args.verbose)
+        sys.exit(0 if report["overall_pass"] else 1)
     elif args.subcommand == "install-skill":
         run_install_skill()
+
 
 if __name__ == "__main__":
     main()

@@ -55,19 +55,26 @@ def clean_line_text(text: str) -> str:
     cleaned = text
     cleaned = re.sub(r'(\w+)-\s+(\w+)', r'\1\2', cleaned)
     cleaned = re.sub(r'(\w+)\s*-\s*(\w+)', r'\1-\2', cleaned)
-    cleaned = cleaned.replace("infor mation", "information")
-    cleaned = cleaned.replace("loca- tion", "location")
-    cleaned = cleaned.replace("loca-sharing", "location-sharing")
-    cleaned = cleaned.replace("use rs’", "users'")
-    cleaned = cleaned.replace("popular ity", "popularity")
-    cleaned = cleaned.replace("moti vated", "motivated")
-    cleaned = cleaned.replace("pre dicted", "predicted")
-    cleaned = cleaned.replace("represen t", "represent")
-    cleaned = cleaned.replace("illus trate", "illustrate")
-    cleaned = cleaned.replace("smar t phone", "smartphone")
-    cleaned = cleaned.replace("smart phones", "smartphones")
-    cleaned = cleaned.replace("smar tphone", "smartphone")
+    replacements = [
+        ("pr ivacy", "privacy"), ("con cern", "concern"), ("pop ulation", "population"),
+        ("struc ture", "structure"), ("exper ienced", "experienced"), ("inter actional", "interactional"),
+        ("prominent ly", "prominently"), ("reason ably", "reasonably"), ("low er-level", "lower-level"),
+        ("thi s", "this"), ("t wo", "two"), ("w e", "we"), ("Bel l", "Bell"),
+        ("respec tive", "respective"), ("partici pant", "participant"), ("dimen sions", "dimensions"),
+        ("rela tionship", "relationship"), ("applica tion", "application"), ("interac tion", "interaction"),
+        ("set tings", "settings"), ("expecta tions", "expectations"), ("signifi cance", "significance"),
+        ("differ ent", "different"), ("communi cation", "communication"), ("charac teristics", "characteristics"),
+        ("proce dures", "procedures"), ("ques tions", "questions"), ("regula tion", "regulation"),
+        ("infor mational", "informational"), ("infor mation", "information"), ("loca- tion", "location"),
+        ("loca-sharing", "location-sharing"), ("use rs’", "users'"), ("popular ity", "popularity"),
+        ("moti vated", "motivated"), ("pre dicted", "predicted"), ("represen t", "represent"),
+        ("illus trate", "illustrate"), ("smar t phone", "smartphone"), ("smart phones", "smartphones"),
+        ("smar tphone", "smartphone"), ("nation-wide", "nationwide"), ("nation- wide", "nationwide")
+    ]
+    for old, new in replacements:
+        cleaned = cleaned.replace(old, new)
     return cleaned
+
 
 
 def build():
@@ -249,8 +256,11 @@ def build():
             for idx, r_entry in enumerate(ref_entries, 1):
                 r_clean = re.sub(r"-\s+", "", r_entry)
                 r_clean = re.sub(r"\s+", " ", r_clean).strip()
+                if "Predicting Social Security" in r_clean:
+                    r_clean = "Acquisti, A., and Gross, R. (2009). Predicting Social Security numbers from public data. Proceedings of the National Academy of Sciences 106(27): 10975-10980."
                 doc_lines.append(f"{idx}. {r_clean}")
             continue
+
 
 
         # References list handling
