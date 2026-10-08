@@ -79,19 +79,29 @@ figcaption {
     text-align: center;
 }
 
-/* Mathematical Formulas */
+/* Mathematical Formulas (W3C MathML & EPUB3 Standard) */
+math {
+    font-family: "Cambria Math", "Latin Modern Math", "STIX Two Math", KaTeX_Math, serif;
+    font-size: 1.05em;
+    direction: ltr;
+}
+
+math[display="block"] {
+    display: block;
+    margin: 1.2em auto;
+    text-align: center;
+}
+
 .math.display {
     margin: 1.2em 0;
     text-align: center;
     overflow-x: auto;
-    font-family: "Cambria Math", "Latin Modern Math", "STIX Two Math", KaTeX_Math, serif;
-    font-size: 1.1em;
     padding: 0.4em 0;
 }
 
 .math.inline {
-    font-family: "Cambria Math", "Latin Modern Math", "STIX Two Math", KaTeX_Math, serif;
-    padding: 0 0.15em;
+    display: inline;
+    padding: 0 0.1em;
 }
 
 /* Tables */
@@ -173,6 +183,23 @@ blockquote {
 """
 
 
+def latex_to_mathml(latex_str: str, display: str = "inline") -> str:
+    """Convert LaTeX string to W3C MathML XML."""
+    raw_tex = latex_str.strip()
+    try:
+        import latex2mathml.converter
+        mml = latex2mathml.converter.convert(raw_tex, display=display)
+        if display == "block":
+            return f'<div class="math display">{mml}</div>'
+        else:
+            return f'<span class="math inline">{mml}</span>'
+    except Exception:
+        safe_tex = html.escape(raw_tex)
+        if display == "block":
+            return f'<div class="math display" role="math">\\[{safe_tex}\\]</div>'
+        return f'<span class="math inline" role="math">\\({safe_tex}\\)</span>'
+
+
 def markdown_to_xhtml(md_text: str) -> str:
     """
     Robust lightweight Markdown-to-XHTML converter.
@@ -237,38 +264,45 @@ def markdown_to_xhtml(md_text: str) -> str:
             table_rows = []
 
     def format_inlines(text: str) -> str:
-        # Escape XML entities first, but preserve already structured tags if any
+        # 1. Protect and convert math first to MathML
+        math_tokens = {}
+
+        def save_display_math(match):
+            key = f"__MATH_DISP_{len(math_tokens)}__"
+            math_tokens[key] = latex_to_mathml(match.group(1), display="block")
+            return key
+
+        def save_inline_math(match):
+            key = f"__MATH_INL_{len(math_tokens)}__"
+            math_tokens[key] = latex_to_mathml(match.group(1), display="inline")
+            return key
+
+        text = re.sub(r"\$\$(.+?)\$\$", save_display_math, text, flags=re.DOTALL)
+        text = re.sub(r"(?<!\$)\$([^\$\n]+?)\$(?!\$)", save_inline_math, text)
+
+        # 2. Escape XML entities on non-math text
         text = html.escape(text, quote=False)
 
-        # Display math: $$ ... $$
-        text = re.sub(
-            r"\$\$(.+?)\$\$",
-            r'<div class="math display">\[\1\]</div>',
-            text
-        )
-        # Inline math: $ ... $
-        text = re.sub(
-            r"(?<!\$)\$([^\$\n]+?)\$(?!\$)",
-            r'<span class="math inline">\(\1\)</span>',
-            text
-        )
-
-        # Images: ![alt](src)
+        # 3. Images: ![alt](src)
         def replace_img(match):
             alt, src = match.group(1), match.group(2)
             return f'<figure><img src="{src}" alt="{alt}"/><figcaption>{alt}</figcaption></figure>'
         text = re.sub(r"!\[(.*?)\]\((.*?)\)", replace_img, text)
 
-        # Links: [text](href)
+        # 4. Links: [text](href)
         text = re.sub(r"\[(.*?)\]\((.*?)\)", r'<a href="\2">\1</a>', text)
 
-        # Bold & Italic
+        # 5. Bold & Italic
         text = re.sub(r"\*\*\*(.+?)\*\*\*", r"<strong><em>\1</em></strong>", text)
         text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
         text = re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
 
-        # Inline Code: `code`
+        # 6. Inline Code: `code`
         text = re.sub(r"`([^`]+?)`", r"<code>\1</code>", text)
+
+        # 7. Restore MathML
+        for key, mml in math_tokens.items():
+            text = text.replace(key, mml)
 
         return text
 
@@ -302,8 +336,8 @@ def markdown_to_xhtml(md_text: str) -> str:
         # Display Math block $$
         if stripped.startswith("$$") and stripped.endswith("$$") and len(stripped) > 2:
             flush_p()
-            math_content = html.escape(stripped[2:-2].strip())
-            xhtml_out.append(f'<div class="math display">\\[{math_content}\\]</div>')
+            math_content = stripped[2:-2].strip()
+            xhtml_out.append(latex_to_mathml(math_content, display="block"))
             idx += 1
             continue
 
@@ -569,7 +603,9 @@ def build_epub3(
             '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
         ]
         for cid, cfname in chapter_manifest:
-            manifest_entries.append(f'<item id="{cid}" href="{cfname}" media-type="application/xhtml+xml"/>')
+            chap_file = oebps / cfname
+            prop_mathml = ' properties="mathml"' if (chap_file.exists() and "<math" in chap_file.read_text(encoding="utf-8")) else ""
+            manifest_entries.append(f'<item id="{cid}" href="{cfname}" media-type="application/xhtml+xml"{prop_mathml}/>')
         for idx, (iname, ipath, imime) in enumerate(asset_manifest, 1):
             manifest_entries.append(f'<item id="img_{idx}" href="{ipath}" media-type="{imime}"/>')
 
