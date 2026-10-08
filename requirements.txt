@@ -1,0 +1,2 @@
+Pillow>=9.0.0
+PyMuPDF>=1.23.0; sys_platform == 'linux' or sys_platform == 'darwin'
