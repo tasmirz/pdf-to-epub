@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
 pdf-to-epub: epub_packager.py
-Self-contained EPUB3 compiler.
-Transforms Markdown + figures + TOC hierarchy into a compliant, beautiful EPUB3 book.
-Zero external dependency required (uses Python standard library).
+Self-contained EPUB3 compiler with native W3C MathML and intelligent single/multi-flow layout.
 """
 
 import argparse
@@ -26,7 +24,7 @@ EPUB_CSS = """
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Georgia, serif;
     font-size: 1.05em;
-    line-height: 1.6;
+    line-height: 1.65;
     margin: 1.5em 5%;
     color: #1a1a1a;
     background-color: #ffffff;
@@ -35,32 +33,49 @@ body {
 /* Headings */
 h1, h2, h3, h4, h5, h6 {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    color: #111827;
+    color: #0f172a;
     font-weight: 700;
     line-height: 1.25;
-    margin-top: 1.5em;
+    margin-top: 1.6em;
     margin-bottom: 0.5em;
     page-break-after: avoid;
     break-after: avoid;
 }
 
-h1 { font-size: 1.8em; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.3em; }
-h2 { font-size: 1.4em; }
-h3 { font-size: 1.15em; }
+h1 { font-size: 1.85em; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.3em; margin-bottom: 0.8em; }
+h2 { font-size: 1.45em; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.2em; margin-top: 1.8em; }
+h3 { font-size: 1.2em; margin-top: 1.4em; }
 
 p {
-    margin: 0 0 0.8em 0;
+    margin: 0 0 0.85em 0;
     text-align: justify;
     text-justify: inter-word;
     hyphens: auto;
 }
 
+/* Horizontal Divider */
+hr {
+    border: none;
+    border-top: 1px solid #cbd5e1;
+    margin: 2.2em auto;
+    width: 90%;
+}
+
+/* Metadata & Author Header */
+.author-block {
+    margin-bottom: 2em;
+    color: #334155;
+    font-size: 0.98em;
+    line-height: 1.5;
+}
+
 /* Figures & Images */
 figure {
-    margin: 1.5em 0;
+    margin: 1.8em auto;
     text-align: center;
     page-break-inside: avoid;
     break-inside: avoid;
+    max-width: 100%;
 }
 
 figure img {
@@ -73,10 +88,11 @@ figure img {
 
 figcaption {
     font-size: 0.88em;
-    color: #4b5563;
+    color: #475569;
     font-style: italic;
     margin-top: 0.5em;
     text-align: center;
+    line-height: 1.4;
 }
 
 /* Mathematical Formulas (W3C MathML & EPUB3 Standard) */
@@ -108,7 +124,7 @@ math[display="block"] {
 table {
     border-collapse: collapse;
     width: 100%;
-    margin: 1.2em 0;
+    margin: 1.4em 0;
     font-size: 0.9em;
     overflow-x: auto;
     display: block;
@@ -156,15 +172,30 @@ pre code {
 
 /* Blockquotes */
 blockquote {
-    border-left: 4px solid #3b82f6;
-    margin: 1em 0;
-    padding: 0.4em 1em;
-    color: #475569;
+    border-left: 3.5px solid #3b82f6;
+    margin: 1.2em 0;
+    padding: 0.5em 1.2em;
+    color: #334155;
     background-color: #f8fafc;
     font-style: italic;
+    border-radius: 0 4px 4px 0;
 }
 
-/* Footnotes */
+blockquote p {
+    margin: 0.4em 0;
+}
+
+/* Lists */
+ul, ol {
+    margin: 0.8em 0 1.2em 1.5em;
+    padding: 0;
+}
+
+li {
+    margin-bottom: 0.4em;
+}
+
+/* Footnotes & Citations */
 .footnote-ref {
     font-size: 0.75em;
     vertical-align: super;
@@ -200,10 +231,17 @@ def latex_to_mathml(latex_str: str, display: str = "inline") -> str:
         return f'<span class="math inline" role="math">\\({safe_tex}\\)</span>'
 
 
+def slugify(text: str) -> str:
+    """Generate a clean URL/anchor slug from a heading text."""
+    clean = re.sub(r"[*_`]", "", text).lower().strip()
+    slug = re.sub(r"[^a-z0-9_-]+", "-", clean).strip("-")
+    return slug or "section"
+
+
 def markdown_to_xhtml(md_text: str) -> str:
     """
     Robust lightweight Markdown-to-XHTML converter.
-    Handles: Headers, paragraphs, images, tables, lists, code blocks, blockquotes, math.
+    Handles: Headers with IDs, paragraphs, hr dividers, images, tables, lists, code blocks, blockquotes, MathML math.
     """
     lines = md_text.splitlines()
     xhtml_out = []
@@ -286,7 +324,8 @@ def markdown_to_xhtml(md_text: str) -> str:
         # 3. Images: ![alt](src)
         def replace_img(match):
             alt, src = match.group(1), match.group(2)
-            return f'<figure><img src="{src}" alt="{alt}"/><figcaption>{alt}</figcaption></figure>'
+            caption_html = f"<figcaption>{alt}</figcaption>" if alt.strip() else ""
+            return f'<figure><img src="{src}" alt="{alt}"/>{caption_html}</figure>'
         text = re.sub(r"!\[(.*?)\]\((.*?)\)", replace_img, text)
 
         # 4. Links: [text](href)
@@ -318,7 +357,6 @@ def markdown_to_xhtml(md_text: str) -> str:
             flush_blockquote()
             flush_table()
             if in_code_block:
-                # Close code block
                 joined = html.escape("\n".join(code_block_lines))
                 xhtml_out.append(f"<pre><code>{joined}</code></pre>")
                 code_block_lines = []
@@ -336,8 +374,34 @@ def markdown_to_xhtml(md_text: str) -> str:
         # Display Math block $$
         if stripped.startswith("$$") and stripped.endswith("$$") and len(stripped) > 2:
             flush_p()
+            flush_list()
+            flush_blockquote()
+            flush_table()
             math_content = stripped[2:-2].strip()
             xhtml_out.append(latex_to_mathml(math_content, display="block"))
+            idx += 1
+            continue
+
+        # Horizontal Rule --- or *** or ___
+        if re.match(r"^(\*{3,}|-{3,}|_{3,})$", stripped):
+            flush_p()
+            flush_list()
+            flush_blockquote()
+            flush_table()
+            xhtml_out.append("<hr/>")
+            idx += 1
+            continue
+
+        # Standalone Image / Figure block ![alt](src)
+        m_img = re.match(r"^!\[(.*?)\]\((.*?)\)$", stripped)
+        if m_img:
+            flush_p()
+            flush_list()
+            flush_blockquote()
+            flush_table()
+            alt, src = m_img.group(1), m_img.group(2)
+            caption_html = f"<figcaption>{format_inlines(alt)}</figcaption>" if alt.strip() else ""
+            xhtml_out.append(f'<figure><img src="{src}" alt="{html.escape(alt, quote=True)}"/>{caption_html}</figure>')
             idx += 1
             continue
 
@@ -357,7 +421,6 @@ def markdown_to_xhtml(md_text: str) -> str:
         if stripped.startswith("|") and stripped.endswith("|"):
             flush_p()
             flush_list()
-            # Check if this is a separator line |---|---|
             if re.match(r"^\|(\s*:?-+:?\s*\|)+$", stripped):
                 idx += 1
                 continue
@@ -377,9 +440,13 @@ def markdown_to_xhtml(md_text: str) -> str:
         if m_head:
             flush_p()
             flush_list()
+            flush_blockquote()
+            flush_table()
             level = len(m_head.group(1))
-            title = format_inlines(m_head.group(2))
-            xhtml_out.append(f"<h{level}>{title}</h{level}>")
+            raw_title = m_head.group(2).strip()
+            title = format_inlines(raw_title)
+            slug = slugify(raw_title)
+            xhtml_out.append(f'<h{level} id="{slug}">{title}</h{level}>')
             idx += 1
             continue
 
@@ -429,11 +496,22 @@ def markdown_to_xhtml(md_text: str) -> str:
     return "\n".join(xhtml_out)
 
 
-def split_into_chapters(md_text: str) -> List[Tuple[str, str, int]]:
-    """
-    Split a Markdown document into chapters by # or ## headers.
-    Returns: List of (chapter_title, chapter_markdown_body, header_level)
-    """
+def extract_headings(md_text: str) -> List[Tuple[str, str, int]]:
+    """Extract (title, slug, level) for all headings."""
+    headings = []
+    for line in md_text.splitlines():
+        m = re.match(r"^(#{1,3})\s+(.*)$", line.strip())
+        if m:
+            lvl = len(m.group(1))
+            raw_title = m.group(2).strip()
+            clean_title = re.sub(r"[*_`]", "", raw_title).strip()
+            slug = slugify(clean_title)
+            headings.append((clean_title, slug, lvl))
+    return headings
+
+
+def split_into_chapters_by_h1(md_text: str) -> List[Tuple[str, str, int]]:
+    """Split a Markdown document into chapters by top-level # headings."""
     lines = md_text.splitlines()
     chapters = []
     current_title = "Introduction"
@@ -441,12 +519,11 @@ def split_into_chapters(md_text: str) -> List[Tuple[str, str, int]]:
     current_lines = []
 
     for line in lines:
-        m = re.match(r"^(#{1,2})\s+(.*)$", line.strip())
+        m = re.match(r"^(#)\s+(.*)$", line.strip())
         if m:
             if current_lines:
                 chapters.append((current_title, "\n".join(current_lines), current_level))
                 current_lines = []
-            current_level = len(m.group(1))
             current_title = m.group(2).strip()
             current_lines.append(line)
         else:
@@ -467,15 +544,24 @@ def build_epub3(
     figures_dir: Optional[str] = None,
     title: str = "Converted Document",
     author: str = "Unknown Author",
-    lang: str = "en"
+    lang: str = "en",
+    split_mode: str = "auto"
 ):
-    """Compile Markdown file into a validated, beautiful EPUB3 container."""
+    """
+    Compile Markdown file into a validated, beautiful EPUB3 container.
+    split_mode:
+      - 'auto': single-flow if document has <= 1 H1 (academic papers, articles); multi-chapter if > 1 H1.
+      - 'single': force single continuous reading flow with anchor navigation (NO blank pages).
+      - 'h1': force split on every top-level # heading.
+    """
     md_file = Path(markdown_path).resolve()
     if not md_file.exists():
         raise FileNotFoundError(f"Markdown file not found: {md_file}")
 
     md_content = md_file.read_text(encoding="utf-8")
-    chapters_raw = split_into_chapters(md_content)
+    h1_headings = re.findall(r"^#\s+", md_content, re.MULTILINE)
+
+    is_single_flow = (split_mode == "single") or (split_mode == "auto" and len(h1_headings) <= 1)
 
     doc_uuid = f"urn:uuid:{uuid.uuid4()}"
     modified_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -519,19 +605,47 @@ def build_epub3(
                         mime = "image/svg+xml"
                     asset_manifest.append((img_file.name, f"figures/{img_file.name}", mime))
 
-        # 5. Build Chapters XHTML
+        # 5. Build Content XHTML Documents
         chapter_manifest = []
         toc_entries = []
 
-        for idx, (chap_title, chap_md, chap_lvl) in enumerate(chapters_raw, 1):
-            filename = f"chapter_{idx:03d}.xhtml"
-            chap_xhtml = markdown_to_xhtml(chap_md)
-            page_title = html.escape(chap_title)
-
-            # Rewrite image links to local relative figures/
-            chap_xhtml = re.sub(r'src="(?:[\./]*figures/|/tmp/[^/]+/figures/)?([^"]+)"', r'src="figures/\1"', chap_xhtml)
+        if is_single_flow:
+            # Single continuous reflowable document (Papers, articles, short reports)
+            filename = "document.xhtml"
+            doc_xhtml = markdown_to_xhtml(md_content)
+            doc_xhtml = re.sub(r'src="(?:[\./]*figures/|/tmp/[^/]+/figures/)?([^"]+)"', r'src="figures/\1"', doc_xhtml)
 
             full_page = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{lang}">
+<head>
+    <meta charset="utf-8"/>
+    <title>{html.escape(title)}</title>
+    <link rel="stylesheet" type="text/css" href="styles.css"/>
+</head>
+<body>
+{doc_xhtml}
+</body>
+</html>"""
+            (oebps / filename).write_text(full_page, encoding="utf-8")
+            chapter_manifest.append(("main_doc", filename))
+
+            # Build TOC with internal anchor jumps (#slug)
+            all_headings = extract_headings(md_content)
+            for h_title, h_slug, h_lvl in all_headings:
+                toc_entries.append((h_title, f"{filename}#{h_slug}", h_lvl))
+
+        else:
+            # Multi-chapter split (Books with multiple H1 sections)
+            chapters_raw = split_into_chapters_by_h1(md_content)
+            for idx, (chap_title, chap_md, chap_lvl) in enumerate(chapters_raw, 1):
+                filename = f"chapter_{idx:03d}.xhtml"
+                chap_xhtml = markdown_to_xhtml(chap_md)
+                page_title = html.escape(chap_title)
+
+                chap_xhtml = re.sub(r'src="(?:[\./]*figures/|/tmp/[^/]+/figures/)?([^"]+)"', r'src="figures/\1"', chap_xhtml)
+
+                full_page = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{lang}">
 <head>
@@ -543,15 +657,15 @@ def build_epub3(
 {chap_xhtml}
 </body>
 </html>"""
-            (oebps / filename).write_text(full_page, encoding="utf-8")
-            chapter_manifest.append((f"chap_{idx}", filename))
-            toc_entries.append((chap_title, filename, chap_lvl))
+                (oebps / filename).write_text(full_page, encoding="utf-8")
+                chapter_manifest.append((f"chap_{idx}", filename))
+                toc_entries.append((chap_title, filename, chap_lvl))
 
         # 6. Build EPUB3 Navigation Document: nav.xhtml
         nav_items_html = []
-        for title_str, fname, lvl in toc_entries:
+        for title_str, target_href, lvl in toc_entries:
             safe_title = html.escape(title_str)
-            nav_items_html.append(f'        <li><a href="{fname}">{safe_title}</a></li>')
+            nav_items_html.append(f'        <li><a href="{target_href}">{safe_title}</a></li>')
         nav_body = "\n".join(nav_items_html)
 
         nav_xhtml = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -575,11 +689,11 @@ def build_epub3(
 
         # 7. Build EPUB2 toc.ncx for legacy ereader fallback
         ncx_points = []
-        for idx, (title_str, fname, lvl) in enumerate(toc_entries, 1):
+        for idx, (title_str, target_href, lvl) in enumerate(toc_entries, 1):
             safe_title = html.escape(title_str)
             ncx_points.append(f"""    <navPoint id="navPoint-{idx}" playOrder="{idx}">
       <navLabel><text>{safe_title}</text></navLabel>
-      <content src="{fname}"/>
+      <content src="{target_href}"/>
     </navPoint>""")
         ncx_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
@@ -606,6 +720,7 @@ def build_epub3(
             chap_file = oebps / cfname
             prop_mathml = ' properties="mathml"' if (chap_file.exists() and "<math" in chap_file.read_text(encoding="utf-8")) else ""
             manifest_entries.append(f'<item id="{cid}" href="{cfname}" media-type="application/xhtml+xml"{prop_mathml}/>')
+
         for idx, (iname, ipath, imime) in enumerate(asset_manifest, 1):
             manifest_entries.append(f'<item id="img_{idx}" href="{ipath}" media-type="{imime}"/>')
 
@@ -621,10 +736,10 @@ def build_epub3(
     <meta property="dcterms:modified">{modified_iso}</meta>
   </metadata>
   <manifest>
-    {chr(10).join("    " + e for e in manifest_entries)}
+{chr(10).join("    " + e for e in manifest_entries)}
   </manifest>
   <spine toc="ncx">
-    {chr(10).join("    " + e for e in spine_entries)}
+{chr(10).join("    " + e for e in spine_entries)}
   </spine>
 </package>"""
         (oebps / "package.opf").write_text(package_opf, encoding="utf-8")
@@ -634,10 +749,7 @@ def build_epub3(
         out_file.parent.mkdir(parents=True, exist_ok=True)
 
         with zipfile.ZipFile(str(out_file), "w") as z:
-            # First item MUST be mimetype with ZIP_STORED
             z.write(str(mimetype_path), "mimetype", compress_type=zipfile.ZIP_STORED)
-
-            # Rest of the items can be ZIP_DEFLATED
             for root, dirs, files in os.walk(str(build_dir)):
                 for f in files:
                     full_p = Path(root) / f
@@ -646,7 +758,8 @@ def build_epub3(
                         continue
                     z.write(str(full_p), str(rel_p), compress_type=zipfile.ZIP_DEFLATED)
 
-        print(f"[OK] Successfully built EPUB3: {out_file} ({len(chapters_raw)} chapters, {len(asset_manifest)} figures)")
+        flow_type = "single-flow continuous" if is_single_flow else f"{len(chapter_manifest)} chapters"
+        print(f"[OK] Successfully built EPUB3 ({flow_type}): {out_file} ({len(toc_entries)} TOC entries, {len(asset_manifest)} figures)")
 
 
 def main():
@@ -657,6 +770,7 @@ def main():
     parser.add_argument("--title", default="Converted Document", help="Book title")
     parser.add_argument("--author", default="Unknown Author", help="Book author")
     parser.add_argument("--lang", default="en", help="Language code (default: en)")
+    parser.add_argument("--split-mode", choices=["auto", "single", "h1"], default="auto", help="Chapter splitting strategy")
 
     args = parser.parse_args()
     build_epub3(
@@ -665,7 +779,8 @@ def main():
         figures_dir=args.figures,
         title=args.title,
         author=args.author,
-        lang=args.lang
+        lang=args.lang,
+        split_mode=args.split_mode
     )
 
 
