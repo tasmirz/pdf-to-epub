@@ -53,9 +53,15 @@ def extract_pdf_sentences(pdf_path: str) -> Tuple[List[str], str]:
         # Skip typical running headers and solitary page numbers
         if re.search(r"Proceedings of the Sixth International AAAI Conference", s, re.I):
             continue
-        if re.match(r"^\d{1,4}$", s):
+        if re.search(r"IEEE.*International Conference", s, re.I):
             continue
-        if "Copyright © 2012" in s or "All rights reserved" in s:
+        if "Authorized licensed use limited to" in s or "Restrictions apply" in s:
+            continue
+        if re.search(r"©\s*\d{4}\s*IEEE", s) or "978-1-" in s:
+            continue
+        if re.match(r"^\d{1,5}$", s):
+            continue
+        if "Copyright ©" in s or "All rights reserved" in s:
             continue
         cleaned_lines.append(s)
 
