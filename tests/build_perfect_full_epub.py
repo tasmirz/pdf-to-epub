@@ -19,15 +19,25 @@ from epub_packager import build_epub3
 
 
 def crop_pure_diagram(pdf_path: str, output_path: str):
-    """Crop only the SEM path boxes diagram on page 6 (no caption text inside)."""
+    """Crop only the SEM path boxes diagram on page 6 (all C1-C8 boxes, no caption text)."""
     img = render_page_image(pdf_path, 6, dpi=300)
     w, h = img.size
     left = int(0.50 * w)
     top = int(0.04 * h)
-    right = int(0.96 * w)
-    bottom = int(0.23 * h)
+    right = int(0.98 * w)
+    bottom = int(0.30 * h)
 
-    cropped = img.crop((left, top, right, bottom))
+    candidate = img.crop((left, top, right, bottom))
+    cw, ch = candidate.size
+    cutoff_y = ch
+    for y in range(int(ch * 0.7), ch, 5):
+        pixels = [candidate.getpixel((x, y)) for x in range(0, cw)]
+        non_white = sum(1 for p in pixels if (p[0] < 240 or p[1] < 240 or p[2] < 240))
+        if y > 750 and non_white > 50:
+            cutoff_y = y - 30
+            break
+
+    cropped = candidate.crop((0, 0, cw, cutoff_y))
     bg = Image.new("RGB", cropped.size, (255, 255, 255))
     diff = ImageChops.difference(cropped, bg)
     bbox = diff.getbbox()
@@ -38,6 +48,7 @@ def crop_pure_diagram(pdf_path: str, output_path: str):
     out.parent.mkdir(parents=True, exist_ok=True)
     cropped.save(str(out), "PNG", optimize=True)
     print(f"[OK] Cropped pure Figure 1 diagram: {out} ({cropped.size[0]}x{cropped.size[1]}px)")
+
 
 
 def clean_line_text(text: str) -> str:
@@ -75,8 +86,18 @@ def build():
     def unwrap_page_lines(page_lines):
         paragraphs = []
         curr = []
+        in_fig1 = False
         for line in page_lines:
             s = line.strip()
+            # Drop Figure 1 diagram and caption OCR text from body stream
+            if "Figure 1: The path model" in s:
+                in_fig1 = True
+                continue
+            if in_fig1:
+                if re.match(r"^271$", s):
+                    in_fig1 = False
+                continue
+
             if not s:
                 if curr:
                     paragraphs.append(clean_line_text(" ".join(curr)))
@@ -115,9 +136,10 @@ def build():
             paragraphs.append(clean_line_text(" ".join(curr)))
         return paragraphs
 
-    all_paras = []
-    for p in reader.pages:
-        all_paras.extend(unwrap_page_lines(p.extract_text().splitlines()))
+    all_doc_lines = []
+    for p_idx, page in enumerate(reader.pages):
+        all_doc_lines.extend(page.extract_text().splitlines())
+    all_paras = unwrap_page_lines(all_doc_lines)
 
     print(f"Extracted {len(all_paras)} raw paragraphs across 8 pages.")
 
@@ -227,8 +249,9 @@ def build():
             for idx, r_entry in enumerate(ref_entries, 1):
                 r_clean = re.sub(r"-\s+", "", r_entry)
                 r_clean = re.sub(r"\s+", " ", r_clean).strip()
-                doc_lines.append(f"{idx}. {r_clean}\n")
+                doc_lines.append(f"{idx}. {r_clean}")
             continue
+
 
         # References list handling
         if in_references:

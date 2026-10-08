@@ -315,8 +315,8 @@ def markdown_to_xhtml(md_text: str) -> str:
             math_tokens[key] = latex_to_mathml(match.group(1), display="inline")
             return key
 
-        text = re.sub(r"\$\$(.+?)\$\$", save_display_math, text, flags=re.DOTALL)
-        text = re.sub(r"(?<!\$)\$([^\$\n]+?)\$(?!\$)", save_inline_math, text)
+        # Inline math: must not be followed by digits (currency like $10, $100) or spaces
+        text = re.sub(r"(?<![\\\$])\$(?!\s|\d)(.+?)(?<!\s)\$(?!\d)", save_inline_math, text)
 
         # 2. Escape XML entities on non-math text
         text = html.escape(text, quote=False)
@@ -435,6 +435,16 @@ def markdown_to_xhtml(md_text: str) -> str:
         elif in_table:
             flush_table()
 
+        # Raw HTML block handling (e.g. <div class="...">, </div>, <br/>, etc.)
+        if re.match(r"^</?(?:div|section|aside|header|footer|span|table|tr|td|th|strong|em|code|br)[^>]*>", stripped, re.IGNORECASE):
+            flush_p()
+            flush_list()
+            flush_blockquote()
+            flush_table()
+            xhtml_out.append(stripped)
+            idx += 1
+            continue
+
         # Headings # .. ######
         m_head = re.match(r"^(#{1,6})\s+(.*)$", stripped)
         if m_head:
@@ -479,7 +489,21 @@ def markdown_to_xhtml(md_text: str) -> str:
         # Blank line = paragraph break
         if not stripped:
             flush_p()
-            flush_list()
+            if in_ol or in_ul:
+                next_non_empty = None
+                for lookahead in lines[idx + 1:]:
+                    ls = lookahead.strip()
+                    if ls:
+                        next_non_empty = ls
+                        break
+                if in_ol and next_non_empty and re.match(r"^\d+\.\s+", next_non_empty):
+                    idx += 1
+                    continue
+                elif in_ul and next_non_empty and re.match(r"^[-*]\s+", next_non_empty):
+                    idx += 1
+                    continue
+                else:
+                    flush_list()
             idx += 1
             continue
 
