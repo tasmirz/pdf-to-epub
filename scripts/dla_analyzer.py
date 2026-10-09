@@ -173,7 +173,11 @@ class HeadingStack:
 
         # Sentences or derivation fragments should not create new H1 chapters
         if self.current_h1:
-            if re.search(r"^[a-z]|^(?:so|thus|hence|where|since|therefore|as|and|or|in|with|by|then)\b|^[\"\“\”]", title, re.I) or re.search(r"[=≠≈≤≥\+−×÷]", title):
+            if re.search(r"^[a-z]", title):
+                return self.current_h1, None
+            if re.search(r"^(?:so|thus|hence|where|since|therefore)\b", title, re.I):
+                return self.current_h1, None
+            if re.search(r"^[\"\“\”]|(?:[=≠≈≤≥])", title):
                 return self.current_h1, None
 
         # Check explicit major standalone chapters first
