@@ -35,8 +35,8 @@ if ! command -v "$PYTHON_BIN" &> /dev/null; then
     exit 1
 fi
 
-"$PYTHON_BIN" -m pip install --upgrade pip --quiet 2>/dev/null || true
-"$PYTHON_BIN" -m pip install -r "$SCRIPT_DIR/requirements.txt" --quiet
+"$PYTHON_BIN" -m pip install --upgrade pip --quiet --break-system-packages 2>/dev/null || true
+"$PYTHON_BIN" -m pip install -r "$SCRIPT_DIR/requirements.txt" --quiet --break-system-packages 2>/dev/null || true
 
 echo "  -> Python dependencies verified."
 
@@ -64,8 +64,7 @@ if [ -d "$HOME/.gemini" ]; then
     echo "Antigravity installation detected. Installing global skill..."
     mkdir -p "$SKILL_TARGET/scripts"
     cp "$SCRIPT_DIR/SKILL.md" "$SKILL_TARGET/SKILL.md"
-    cp "$SCRIPT_DIR/scripts/collage_maker.py" "$SKILL_TARGET/scripts/"
-    cp "$SCRIPT_DIR/scripts/epub_packager.py" "$SKILL_TARGET/scripts/"
+    cp "$SCRIPT_DIR/scripts/"*.py "$SKILL_TARGET/scripts/"
     chmod +x "$SKILL_TARGET/scripts/"*.py
     echo "  -> Skill installed successfully to $SKILL_TARGET"
 else

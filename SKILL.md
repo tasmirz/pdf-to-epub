@@ -29,16 +29,33 @@ A vision-first, parallel multi-agent skill for converting complex PDF documents 
 
 ## Bundled Helper Utilities
 
-The skill bundles two standalone Python scripts located at:
-- `~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py`
-- `~/.gemini/config/skills/pdf-to-epub/scripts/epub_packager.py`
+The skill bundles standalone Python scripts located at `~/.gemini/config/skills/pdf-to-epub/scripts/`:
+- `pptx_parser.py`: Direct PowerPoint (PPTX / PPT) to Markdown & EPUB3 extraction engine with OCR.
+- `collage_maker.py`: Adaptive visual grid collage generator and region cropper (supports PDF, PPTX, PPT).
+- `epub_packager.py`: Self-contained EPUB3 compiler with native W3C MathML and single/multi-flow layout.
+- `verify_fidelity.py`: Line-by-line quality and fidelity verifier with sentence alignment coverage.
+- `cli.py`: Unified command-line interface (`pdf-to-epub`).
 
-### 1. `collage_maker.py`
+### 1. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown)
 ```bash
-# 1. Get total page count
+# Convert PPTX or legacy PPT directly into reflowable EPUB3
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.pptx \
+    -o presentation.epub \
+    --title "Course Module Title" \
+    --author "Professor Name"
+
+# Extract presentation to Markdown with extracted figures and OCR
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.pptx \
+    -o presentation.md \
+    --figures figures/
+```
+
+### 2. `collage_maker.py`
+```bash
+# 1. Get total page/slide count
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py count document.pdf
 
-# 2. Render visual collage grid (3x3, 2x2, or 1x1)
+# 2. Render visual collage grid (3x3, 2x2, or 1x1) - works on PDF and PPTX/PPT
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py collage document.pdf \
     --start 1 --end 9 --grid 3x3 -o /tmp/probe_3x3.png --dpi 120
 
@@ -47,7 +64,7 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py crop docume
     --page 3 --coords "150,200,450,850" -o figures/fig_p3_1.png --dpi 300
 ```
 
-### 2. `epub_packager.py`
+### 3. `epub_packager.py`
 ```bash
 # Compile Markdown + cropped figures into valid EPUB3
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/epub_packager.py document.md \
@@ -59,12 +76,12 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/epub_packager.py document.md
     --split-mode auto
 ```
 
-### 3. `verify_fidelity.py` (Line-by-Line Quality & Fidelity Verifier)
+### 4. `verify_fidelity.py` (Line-by-Line Quality & Fidelity Verifier)
 ```bash
-# Run line-by-line verification after each build / turn
+# Run line-by-line verification after each build (supports PDF, PPTX, and PPT)
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/verify_fidelity.py \
-    --pdf document.pdf \
-    --epub book.epub \
+    --source presentation.pptx \
+    --epub presentation.epub \
     --threshold 95.0 \
     --verbose
 ```

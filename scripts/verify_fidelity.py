@@ -78,6 +78,36 @@ def extract_pdf_sentences(pdf_path: str) -> Tuple[List[str], str]:
     return sentences, full_text
 
 
+def extract_pptx_sentences(pptx_path: str) -> Tuple[List[str], str]:
+    """Extract clean sentences and text from PowerPoint file."""
+    import pptx
+    p = Path(pptx_path).resolve()
+    prs = pptx.Presentation(str(p))
+    lines = []
+    for s in prs.slides:
+        for shp in s.shapes:
+            if shp.has_text_frame:
+                for p_elem in shp.text_frame.paragraphs:
+                    t = p_elem.text.strip()
+                    if t and len(t) > 5 and not re.match(r"^\d{1,3}$", t):
+                        lines.append(t)
+    full_text = " ".join(lines)
+    full_text = re.sub(r"\s+", " ", full_text).strip()
+    sentences = [
+        s.strip() for s in re.split(r"(?<=[.!?])\s+", full_text)
+        if len(s.strip()) > 15
+    ]
+    return sentences, full_text
+
+
+def extract_source_sentences(source_path: str) -> Tuple[List[str], str]:
+    """Extract sentences from PDF, PPTX, or PPT source file."""
+    p = Path(source_path)
+    if p.suffix.lower() in [".pptx", ".ppt"]:
+        return extract_pptx_sentences(str(p))
+    return extract_pdf_sentences(str(p))
+
+
 def extract_epub_content(epub_path: str) -> Dict[str, Any]:
     """Extract all text, XHTML files, images, and math from an EPUB3 archive."""
     res = {
@@ -286,10 +316,11 @@ def align_sentences(pdf_sentences: List[str], epub_text: str) -> Tuple[int, List
 
 
 
-def run_verification(pdf_path: str, epub_path: str, threshold: float = 95.0, verbose: bool = False) -> Dict[str, Any]:
+def run_verification(source_path: str, epub_path: str, threshold: float = 95.0, verbose: bool = False) -> Dict[str, Any]:
     """Execute end-to-end fidelity check and return summary report."""
     report = {
-        "pdf_path": str(pdf_path),
+        "source_path": str(source_path),
+        "pdf_path": str(source_path),
         "epub_path": str(epub_path),
         "checks": {},
         "overall_pass": True,
@@ -298,7 +329,7 @@ def run_verification(pdf_path: str, epub_path: str, threshold: float = 95.0, ver
     }
 
     # 1. Extract content
-    pdf_sentences, pdf_full = extract_pdf_sentences(pdf_path)
+    source_sentences, source_full = extract_source_sentences(source_path)
     epub_data = extract_epub_content(epub_path)
 
     # 2. Container & XML Checks
@@ -336,10 +367,11 @@ def run_verification(pdf_path: str, epub_path: str, threshold: float = 95.0, ver
     }
 
     # 6. Sentence Alignment Coverage
-    matched, missing, coverage = align_sentences(pdf_sentences, epub_data.get("full_text", ""))
+    matched, missing, coverage = align_sentences(source_sentences, epub_data.get("full_text", ""))
     report["coverage_pct"] = round(coverage, 2)
     report["checks"]["sentence_alignment"] = {
-        "pdf_sentences_total": len(pdf_sentences),
+        "source_sentences_total": len(source_sentences),
+        "pdf_sentences_total": len(source_sentences),
         "matched_count": matched,
         "missing_count": len(missing),
         "coverage_pct": round(coverage, 2),
@@ -359,9 +391,9 @@ def run_verification(pdf_path: str, epub_path: str, threshold: float = 95.0, ver
 def print_cli_report(report: Dict[str, Any], verbose: bool = False):
     """Print clean formatted terminal output."""
     print("=" * 72)
-    print("      PDF-TO-EPUB FIDELITY & QUALITY VERIFICATION REPORT")
+    print("      DOCUMENT-TO-EPUB FIDELITY & QUALITY VERIFICATION REPORT")
     print("=" * 72)
-    print(f" Source PDF : {report['pdf_path']}")
+    print(f" Source Doc : {report.get('source_path', report.get('pdf_path'))}")
     print(f" Target EPUB: {report['epub_path']}")
     print("-" * 72)
 
@@ -395,13 +427,13 @@ def print_cli_report(report: Dict[str, Any], verbose: bool = False):
     align = checks.get("sentence_alignment", {})
     a_status = "[PASS]" if align.get("pass") else "[FAIL]"
     cov = align.get("coverage_pct", 0.0)
-    tot = align.get("pdf_sentences_total", 0)
+    tot = align.get("source_sentences_total", align.get("pdf_sentences_total", 0))
     mat = align.get("matched_count", 0)
     print(f"{a_status:8} Line-by-Line / Sentence Coverage: {mat}/{tot} ({cov:.1f}%)")
 
     missing = align.get("missing_sample", [])
     if missing and (not align.get("pass") or verbose):
-        print("\n  Sample Unmatched PDF Segments:")
+        print("\n  Sample Unmatched Segments:")
         for idx, m in enumerate(missing[:5], 1):
             print(f"    {idx}. {m[:100]}...")
 
@@ -412,15 +444,15 @@ def print_cli_report(report: Dict[str, Any], verbose: bool = False):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Verify PDF-to-EPUB Fidelity")
-    parser.add_argument("--pdf", required=True, help="Path to original PDF file")
+    parser = argparse.ArgumentParser(description="Verify Document-to-EPUB Fidelity")
+    parser.add_argument("--source", "--pdf", dest="source", required=True, help="Path to original PDF or PPTX/PPT file")
     parser.add_argument("--epub", required=True, help="Path to generated EPUB file")
     parser.add_argument("--threshold", type=float, default=95.0, help="Required sentence coverage percentage (default: 95.0)")
     parser.add_argument("--verbose", action="store_true", help="Print detailed unmatched sentences and debug info")
     parser.add_argument("--json", help="Save output report as JSON file")
 
     args = parser.parse_args()
-    report = run_verification(args.pdf, args.epub, threshold=args.threshold, verbose=args.verbose)
+    report = run_verification(args.source, args.epub, threshold=args.threshold, verbose=args.verbose)
 
     if args.json:
         Path(args.json).write_text(json.dumps(report, indent=2), encoding="utf-8")

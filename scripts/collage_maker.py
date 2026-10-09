@@ -11,15 +11,49 @@ import os
 import subprocess
 import sys
 import tempfile
+import hashlib
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 
+def resolve_document_pdf(doc_path: str) -> str:
+    """
+    If input is PPTX or PPT, automatically convert to cached PDF via LibreOffice.
+    Returns the path to a readable PDF.
+    """
+    p = Path(doc_path).resolve()
+    if p.suffix.lower() in [".pptx", ".ppt"]:
+        cache_dir = Path("/tmp/pdf_cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        stat = p.stat()
+        file_hash = hashlib.md5(f"{p}:{stat.st_mtime}".encode()).hexdigest()[:12]
+        cached_pdf = cache_dir / f"{p.stem}_{file_hash}.pdf"
+        if not cached_pdf.exists():
+            cmd = ["soffice", "--headless", "--convert-to", "pdf", str(p), "--outdir", str(cache_dir)]
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            out_pdf = cache_dir / f"{p.stem}.pdf"
+            if out_pdf.exists():
+                out_pdf.rename(cached_pdf)
+        if cached_pdf.exists():
+            return str(cached_pdf)
+    return str(p)
+
+
 def get_pdf_page_count(pdf_path: str) -> int:
-    """Detect total pages in PDF using fitz, pdfinfo, or pypdf."""
+    """Detect total pages/slides in PDF or PPTX/PPT."""
+    p = Path(pdf_path)
+    if p.suffix.lower() == ".pptx":
+        try:
+            import pptx
+            prs = pptx.Presentation(str(p))
+            return len(prs.slides)
+        except Exception:
+            pass
+
+    resolved_path = resolve_document_pdf(pdf_path)
     try:
         import fitz
-        doc = fitz.open(pdf_path)
+        doc = fitz.open(resolved_path)
         count = len(doc)
         doc.close()
         return count
@@ -27,7 +61,7 @@ def get_pdf_page_count(pdf_path: str) -> int:
         pass
 
     try:
-        res = subprocess.run(["pdfinfo", pdf_path], capture_output=True, text=True, check=True)
+        res = subprocess.run(["pdfinfo", resolved_path], capture_output=True, text=True, check=True)
         for line in res.stdout.splitlines():
             if line.startswith("Pages:"):
                 return int(line.split(":")[1].strip())
@@ -36,22 +70,22 @@ def get_pdf_page_count(pdf_path: str) -> int:
 
     try:
         import pypdf
-        reader = pypdf.PdfReader(pdf_path)
+        reader = pypdf.PdfReader(resolved_path)
         return len(reader.pages)
     except Exception:
         pass
 
     # Fallback using pdftoppm probe
     try:
-        res = subprocess.run(["pdftoppm", "-png", "-f", "1", "-l", "1", pdf_path, "/dev/null"], capture_output=True, text=True)
-        # We don't easily get count from pdftoppm alone if pdfinfo fails, default to 100
+        res = subprocess.run(["pdftoppm", "-png", "-f", "1", "-l", "1", resolved_path, "/dev/null"], capture_output=True, text=True)
         return 50
     except Exception:
         return 1
 
 
 def render_page_image(pdf_path: str, page_num: int, dpi: int = 150) -> Image.Image:
-    """Render a single 1-indexed PDF page as a PIL Image."""
+    """Render a single 1-indexed PDF/PPTX page as a PIL Image."""
+    pdf_path = resolve_document_pdf(pdf_path)
     # Method 1: PyMuPDF if available
     try:
         import fitz
