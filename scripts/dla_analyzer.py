@@ -171,6 +171,11 @@ class HeadingStack:
         if not title:
             return (self.current_h1 or "Topic"), None
 
+        # Sentences or derivation fragments should not create new H1 chapters
+        if self.current_h1:
+            if re.search(r"^[a-z]|^(?:so|thus|hence|where|since|therefore|as|and|or|in|with|by|then)\b|^[\"\“\”]", title, re.I) or re.search(r"[=≠≈≤≥\+−×÷]", title):
+                return self.current_h1, None
+
         # Check explicit major standalone chapters first
         major_standalone = [
             (r"problems?\s+to\s+be\s+solved|practice\s*problems?|review\s*questions?", "Practice Problems & Exercises"),

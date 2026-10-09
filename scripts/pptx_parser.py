@@ -343,10 +343,11 @@ def parse_presentation(
                     if filter_repetitive and pattern_detector.is_repetitive(p_text, top_r, bot_r):
                         continue
 
-                    # If no slide title was found yet, use first prominent text
-                    if not slide_title and p.level == 0 and len(p_text) < 80:
-                        slide_title = p_text
-                        continue
+                    # If no slide title was found yet, use first prominent text if title-shaped
+                    if not slide_title and p.level == 0 and len(p_text) < 60:
+                        if not re.search(r"^[a-z]|^(?:so|thus|hence|where|since|therefore|as|and|or|in|with|by|then)\b|^[\"\“\”]", p_text, re.I) and not re.search(r"[=≠≈≤≥\+−×÷]", p_text):
+                            slide_title = p_text
+                            continue
 
                     # Markdown bullet formatting
                     indent = "  " * p.level
@@ -383,9 +384,6 @@ def parse_presentation(
         except Exception:
             pass
 
-        if not slide_title:
-            slide_title = f"Topic {s_idx}"
-
         # 6. Apply Heading Stack State Machine
         if use_heading_stack:
             heading_info = heading_stack.process_slide(slide_title, s_idx)
@@ -398,11 +396,12 @@ def parse_presentation(
                     "page": s_idx
                 })
         else:
-            heading_md = f"# Slide {s_idx}: {slide_title}"
+            fallback_title = slide_title or f"Topic {s_idx}"
+            heading_md = f"# Slide {s_idx}: {fallback_title}"
             events.append({
                 "type": "heading",
                 "level": 1,
-                "title": f"Slide {s_idx}: {slide_title}",
+                "title": f"Slide {s_idx}: {fallback_title}",
                 "page": s_idx
             })
 

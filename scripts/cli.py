@@ -11,6 +11,14 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+for cd in [
+    HERE,
+    Path.home() / ".gemini/config/skills/presentation-to-epub/scripts",
+    Path.home() / ".gemini/config/skills/pdf-to-epub/scripts",
+    Path("/home/user/Projects/pdf-to-epub/scripts")
+]:
+    if cd.exists() and str(cd) not in sys.path:
+        sys.path.insert(0, str(cd))
 
 def run_collage(args):
     from collage_maker import main as cm_main
