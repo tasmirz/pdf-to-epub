@@ -199,6 +199,7 @@ def parse_presentation(
 
     if first_slide_title:
         doc_title = first_slide_title
+    doc_title = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", doc_title).strip()
 
     # Convert to PDF in background if complex slides/OLE objects exist or for slide crops
     pdf_backup_path = None
@@ -222,6 +223,7 @@ def parse_presentation(
         # 1. Detect Slide Title
         if slide.shapes.title and slide.shapes.title.text.strip():
             slide_title = slide.shapes.title.text.strip().replace("\n", " ")
+            slide_title = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", slide_title).strip()
 
         # 2. Extract Shapes
         for shape in extract_shapes_recursive(slide.shapes):
@@ -292,19 +294,16 @@ def parse_presentation(
 
                     # Markdown bullet formatting based on level
                     indent = "  " * p.level
-                    # Bold runs if styled
-                    styled_text = ""
-                    for run in p.runs:
-                        t = run.text
-                        if run.font.bold and t.strip():
-                            styled_text += f"**{t}**"
-                        elif run.font.italic and t.strip():
-                            styled_text += f"*{t}*"
-                        else:
-                            styled_text += t
-                    if not styled_text.strip():
-                        styled_text = p_text
-                    styled_text = clean_bullet_symbol(styled_text)
+                    # Clean control characters (like \x0b vertical tab from Shift+Enter)
+                    cleaned_p_text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", p_text).strip()
+
+                    # Check bold / italic at paragraph level if all non-empty runs share style
+                    styled_text = cleaned_p_text
+                    non_empty_runs = [r for r in p.runs if r.text.strip()]
+                    if non_empty_runs and all(r.font.bold for r in non_empty_runs):
+                        styled_text = f"**{cleaned_p_text}**"
+                    elif non_empty_runs and all(r.font.italic for r in non_empty_runs):
+                        styled_text = f"*{cleaned_p_text}*"
 
                     if p.level > 0 or len(txt_f.paragraphs) > 1:
                         tf_paragraphs.append(f"{indent}- {styled_text}")
@@ -362,18 +361,29 @@ def parse_presentation(
             section_lines.append(f"![Illustration for Slide {s_idx}](figures/{img_name})")
             section_lines.append("")
 
-            # If slide has minimal native text or warning said SOME ARE IMAGES, run OCR!
+            # Smart OCR: Run when slide text is sparse (< 60 chars) or for diagram images
             if ocr and HAS_OCR:
-                ocr_text = run_ocr_on_image(img_bytes, lang=ocr_lang)
-                if ocr_text and len(ocr_text) > 15:
-                    ocr_count += 1
-                    # Avoid duplicate if OCR matches native text
-                    if ocr_text.lower() not in " ".join(slide_text_blocks).lower():
-                        section_lines.append(f"**Extracted Text from Slide Image:**\n")
-                        # Format as quote block
-                        for oline in ocr_text.splitlines():
-                            section_lines.append(f"> {oline}")
-                        section_lines.append("")
+                should_ocr = (total_native_text_len < 60)
+                if not should_ocr:
+                    try:
+                        im_probe = Image.open(io.BytesIO(img_bytes))
+                        # Only OCR if image is large enough to be a diagram / text capture
+                        should_ocr = (im_probe.width >= 400 and im_probe.height >= 250)
+                    except Exception:
+                        should_ocr = False
+
+                if should_ocr:
+                    ocr_text = run_ocr_on_image(img_bytes, lang=ocr_lang)
+                    if ocr_text and len(ocr_text) > 15:
+                        ocr_count += 1
+                        # Avoid duplicate if OCR matches native text
+                        if ocr_text.lower() not in " ".join(slide_text_blocks).lower():
+                            section_lines.append(f"**Extracted Text from Slide Image:**\n")
+                            # Format as quote block and sanitize delimiter artifacts
+                            for oline in ocr_text.splitlines():
+                                clean_ol = re.sub(r"\\([()\[\]])", r"\1", oline)
+                                section_lines.append(f"> {clean_ol}")
+                            section_lines.append("")
 
         # If slide had NO native text and NO extracted images, but PDF fallback has a page:
         if total_native_text_len == 0 and not slide_images and pdf_doc and s_idx <= len(pdf_doc):
@@ -392,14 +402,15 @@ def parse_presentation(
                         ocr_count += 1
                         section_lines.append(f"**Extracted Text:**\n")
                         for oline in ocr_text.splitlines():
-                            section_lines.append(f"> {oline}")
+                            clean_ol = re.sub(r"\\([()\[\]])", r"\1", oline)
+                            section_lines.append(f"> {clean_ol}")
                         section_lines.append("")
             except Exception:
                 pass
 
         # If PDF has extra text (like OLE equations) not present in native text, append it
         if pdf_fallback_text and has_ole:
-            clean_pdf_lines = [l.strip() for l in pdf_fallback_text.splitlines() if l.strip()]
+            clean_pdf_lines = [re.sub(r"\\([()\[\]])", r"\1", l).strip() for l in pdf_fallback_text.splitlines() if l.strip()]
             new_lines = [l for l in clean_pdf_lines if l.lower() not in " ".join(slide_text_blocks).lower()]
             if new_lines and len(new_lines) > 2:
                 section_lines.append("**Supplementary Content & Formulas:**\n")

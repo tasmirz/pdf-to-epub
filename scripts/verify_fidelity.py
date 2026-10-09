@@ -81,14 +81,22 @@ def extract_pdf_sentences(pdf_path: str) -> Tuple[List[str], str]:
 def extract_pptx_sentences(pptx_path: str) -> Tuple[List[str], str]:
     """Extract clean sentences and text from PowerPoint file."""
     import pptx
+    from pptx.enum.shapes import PP_PLACEHOLDER
     p = Path(pptx_path).resolve()
     prs = pptx.Presentation(str(p))
     lines = []
     for s in prs.slides:
         for shp in s.shapes:
+            if shp.is_placeholder:
+                try:
+                    if shp.placeholder_format.type in (PP_PLACEHOLDER.FOOTER, PP_PLACEHOLDER.HEADER, PP_PLACEHOLDER.SLIDE_NUMBER, PP_PLACEHOLDER.DATE):
+                        continue
+                except Exception:
+                    pass
             if shp.has_text_frame:
                 for p_elem in shp.text_frame.paragraphs:
                     t = p_elem.text.strip()
+                    t = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", t).strip()
                     if t and len(t) > 5 and not re.match(r"^\d{1,3}$", t):
                         lines.append(t)
     full_text = " ".join(lines)
@@ -230,7 +238,7 @@ def lint_epub_markup(epub_data: Dict[str, Any]) -> List[str]:
         # 4. Words jammed together due to currency $ math false positives
         squished_words = re.findall(r"\b[A-Z][a-z]+(?:[A-Z][a-z]+){3,}\b", xhtml)
         # Filter out common camelCase or legitimate identifiers
-        filtered_squished = [w for w in squished_words if not w.startswith(("MathML", "JavaScript", "PubMed"))]
+        filtered_squished = [w for w in squished_words if not w.startswith(("MathML", "JavaScript", "PubMed", "RotationToAxisAngle"))]
         if filtered_squished:
             issues.append(f"[{fname}] Possible squished text detected (e.g. from math regex): {filtered_squished[:3]}")
 
@@ -259,6 +267,7 @@ def normalize_for_alignment(text: str) -> str:
     t = re.sub(r"[\u201c\u201d\u0022]", '"', t)
     t = re.sub(r"[\u2013\u2014\u2212]", "-", t)
     t = re.sub(r"-\s+", "", t)
+    t = re.sub(r"[√]", "sqrt", t)
     t = re.sub(r"\s+", " ", t)
     # Kerning artifacts e.g. "pr ivacy" -> "privacy"
     t = re.sub(r"\bpr ivacy\b", "privacy", t)
