@@ -94,25 +94,52 @@ def ensure_pptx(file_path: str) -> Tuple[str, Optional[str]]:
 def convert_presentation_to_pdf(presentation_path: str, output_pdf_dir: Optional[str] = None) -> str:
     """
     Convert presentation (PPT/PPTX) to PDF using LibreOffice headless.
+    Unhides all hidden slides to guarantee 1:1 slide-to-page alignment.
     Used for rendering high-res slide figures, OLE equations, and visual layout probes.
     """
     out_dir = output_pdf_dir or tempfile.mkdtemp(prefix="pptx_pdf_")
-    cmd = [
-        "soffice", "--headless", "--convert-to", "pdf",
-        str(presentation_path), "--outdir", out_dir
-    ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    if res.returncode != 0:
-        raise RuntimeError(f"LibreOffice failed to convert presentation to PDF: {res.stderr}")
+    p = Path(presentation_path).resolve()
+    target_to_convert = str(p)
+    tmp_pptx = None
 
-    base_name = Path(presentation_path).stem
-    expected = Path(out_dir) / f"{base_name}.pdf"
-    if not expected.exists():
-        candidates = list(Path(out_dir).glob("*.pdf"))
-        if candidates:
-            return str(candidates[0])
-        raise RuntimeError(f"Converted PDF not found in {out_dir}")
-    return str(expected)
+    if p.suffix.lower() == ".pptx":
+        try:
+            prs = pptx.Presentation(str(p))
+            has_hidden = any('show' in s.element.attrib for s in prs.slides)
+            if has_hidden:
+                for s in prs.slides:
+                    if 'show' in s.element.attrib:
+                        del s.element.attrib['show']
+                tmp_pptx = tempfile.NamedTemporaryFile("wb", suffix=".pptx", delete=False)
+                prs.save(tmp_pptx.name)
+                tmp_pptx.close()
+                target_to_convert = tmp_pptx.name
+        except Exception:
+            pass
+
+    try:
+        cmd = [
+            "soffice", "--headless", "--convert-to", "pdf",
+            target_to_convert, "--outdir", out_dir
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"LibreOffice failed to convert presentation to PDF: {res.stderr}")
+
+        base_name = Path(target_to_convert).stem
+        expected = Path(out_dir) / f"{base_name}.pdf"
+        if not expected.exists():
+            candidates = list(Path(out_dir).glob("*.pdf"))
+            if candidates:
+                return str(candidates[0])
+            raise RuntimeError(f"Converted PDF not found in {out_dir}")
+        return str(expected)
+    finally:
+        if tmp_pptx and os.path.exists(tmp_pptx.name):
+            try:
+                os.remove(tmp_pptx.name)
+            except Exception:
+                pass
 
 
 def clean_bullet_symbol(text: str) -> str:

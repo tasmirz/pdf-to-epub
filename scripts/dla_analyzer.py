@@ -163,21 +163,61 @@ class HeadingStack:
     def extract_hierarchy(self, slide_title: str) -> Tuple[str, Optional[str]]:
         """
         Decomposes slide title into (Major Topic, Sub Topic).
-        E.g.
-        'Rotation – 3D: Rotation about z-axis' -> ('3D Rotation', 'Rotation about z-axis')
-        'Translation – 3D' -> ('3D Translation', None)
-        'Rotations with Quaternions: Matrix form' -> ('Rotations with Quaternions', 'Matrix form')
+        Uses thematic clustering and subordinate heuristics to prevent
+        artificial 1-slide page breaks and unite continuation slides into
+        cohesive textbook chapters.
         """
         title = self.clean_title(slide_title)
+        if not title:
+            return (self.current_h1 or "Topic"), None
 
-        # Delimiters like ':', '–', '-'
+        # Check explicit major standalone chapters first
+        major_standalone = [
+            (r"problems?\s+to\s+be\s+solved|practice\s*problems?|review\s*questions?", "Practice Problems & Exercises"),
+            (r"further\s*composition|finding\s*composite\s*r", "Arbitrary Axis Rotation by Decomposition")
+        ]
+        for pat, canonical in major_standalone:
+            if re.search(pat, title, re.I):
+                sub = title if title.lower() != canonical.lower() else None
+                return canonical, sub
+
+        # Subordinate patterns that should remain under active major topic
+        subordinate_keywords = [
+            r"^examples?", r"^problems?", r"^exercises?", r"^solutions?", r"^proof", r"^derivation",
+            r"^digression", r"^comments?", r"^connections?", r"^finally", r"^solve it", r"^diy",
+            r"^notes?", r"^summary", r"^more\s+", r"^so\s+how", r"^how\s+do\s+we", r"^why\s+is",
+            r"^visualization", r"^transform\s+.*like", r"^finding\s+.*", r"^rotate\s+about",
+            r"^translate\s+.*", r"^inverse\s+alignment"
+        ]
+        if self.current_h1 and any(re.search(kw, title, re.I) for kw in subordinate_keywords):
+            return self.current_h1, title
+
+        # Thematic clusters for course lecture slides
+        clusters = [
+            (r"quaternion", "Quaternions & 3D Rotation"),
+            (r"rodrigues", "Rodrigues' Rotation Formula & Axis-Angle"),
+            (r"axis\s+and\s+angle", "Rodrigues' Rotation Formula & Axis-Angle"),
+            (r"mirror\s*reflection|m[nN]\s*,\s*p|other\s+transformations", "Mirror Reflection & Other Transformations"),
+            (r"normal|tangent\s*vector|object\s+transformation|shear\s+and\s+scale", "Surface Normal Transformations"),
+            (r"aligning\s*vector|a[vV]\s*:|alignment\s*transformation", "Vector Alignment Transformation"),
+            (r"coordinate[\s-]axes\s*rotations?|order\s+of\s+rotations|rotation\s*(?:about|in|–|-)\s*(?:[xyz]-?axis|3d)", "3D Rotations about Coordinate Axes"),
+            (r"general\s*3d\s*rotations?|r\s*[\u03b8\u0398\u03b8,\s\uF071]?\s*,\s*l", "General 3D Rotations (Arbitrary Axis)"),
+            (r"composite\s*transformations?|relative\s*scaling", "Composite 3D Transformations"),
+            (r"coordinate\s*transformations?", "Coordinate Transformations"),
+            (r"plane|vector\s*equation|curve\s*&\s*line|surface\s*&\s*plane|vectors\s*in\s*3d", "3D Geometry & Vector Foundations"),
+            (r"translation\s*[–-]\s*3d|scaling\s*[–-]\s*3d", "3D Translation & Scaling"),
+            (r"3d\s*modelling\s*transform|3d\s*transformations|orientation", "Introduction to 3D Transformations")
+        ]
+        for pat, canonical in clusters:
+            if re.search(pat, title, re.I):
+                sub = title if title.lower() != canonical.lower() else None
+                return canonical, sub
+
+        # Fallback delimiter split
         parts = [p.strip() for p in re.split(r"[:–—]", title) if p.strip()]
-
         if len(parts) >= 2:
-            main = parts[0]
+            main = self._canonicalize_topic(parts[0])
             sub = " — ".join(parts[1:])
-            # Normalize common 3D prefix/suffix: "Rotation - 3D" -> "3D Rotation"
-            main = self._canonicalize_topic(main)
             return main, sub
 
         main = self._canonicalize_topic(title)
@@ -185,7 +225,6 @@ class HeadingStack:
 
     def _canonicalize_topic(self, topic: str) -> str:
         t = topic.strip()
-        # "Rotation in 3D" or "Rotation - 3D" -> "3D Rotation"
         m = re.match(r"^(.*?)\s*(?:in|–|-)\s*3D$", t, re.I)
         if m:
             return f"3D {m.group(1).strip()}"
@@ -202,12 +241,11 @@ class HeadingStack:
             "h1_title": str,
             "h2_title": Optional[str],
             "h3_title": Optional[str],
-            "heading_markdown": str
+            "heading_markdown": str,
+            "slide_anchor": str
         }
         """
         major, sub = self.extract_hierarchy(slide_title)
-
-        # Normalize comparison
         is_same_h1 = (self.current_h1 and major.lower() == self.current_h1.lower())
 
         if not is_same_h1:
@@ -234,8 +272,9 @@ class HeadingStack:
             self.slide_index_in_topic += 1
 
             if sub:
-                is_same_h2 = (self.current_h2 and sub.lower() == self.current_h2.lower())
-                if not is_same_h2:
+                norm_sub = re.sub(r"[^a-z0-9]", "", sub.lower())
+                norm_curr = re.sub(r"[^a-z0-9]", "", (self.current_h2 or "").lower())
+                if norm_sub and norm_sub != norm_curr:
                     self.current_h2 = sub
                     return {
                         "is_new_h1": False,

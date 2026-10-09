@@ -90,7 +90,7 @@ def main():
     p_col.add_argument("pdf", help="Path to input PDF")
     p_col.add_argument("-s", "--start", type=int, default=1, help="Start page")
     p_col.add_argument("-e", "--end", type=int, default=9, help="End page")
-    p_col.add_argument("-g", "--grid", choices=["3x3", "2x2", "1x1"], default="3x3")
+    p_col.add_argument("-g", "--grid", choices=["3x3", "3x2", "2x3", "2x2", "1x1"], default="3x3", help="Grid configuration (3x2 is optimal for widescreen 16:9 slides)")
     p_col.add_argument("-o", "--output", required=True, help="Output image file (.png)")
     p_col.add_argument("--dpi", type=int, default=120, help="Rendering DPI")
 
@@ -130,6 +130,7 @@ def main():
     p_pptx.add_argument("--no-heading-stack", action="store_true", help="Disable heading stack (split every slide)")
     p_pptx.add_argument("--no-filter-repetitive", action="store_true", help="Disable repetitive footer/header filtering")
     p_pptx.add_argument("--manifest", help="Optional path to output DLA manifest JSON")
+    p_pptx.add_argument("--transcriptions", help="Optional JSON file mapping slide numbers to LaTeX transcriptions")
 
     # convert (universal)
     p_conv = subparsers.add_parser("convert", help="Universal converter for PDF, PPTX, and PPT to EPUB3")
@@ -166,6 +167,12 @@ def main():
         out_p = Path(args.output).resolve()
         use_stack = not getattr(args, "no_heading_stack", False)
         filter_rep = not getattr(args, "no_filter_repetitive", False)
+        transcriptions_dict = None
+        if getattr(args, "transcriptions", None) and Path(args.transcriptions).exists():
+            import json
+            raw_t = json.loads(Path(args.transcriptions).read_text(encoding="utf-8"))
+            transcriptions_dict = {int(k): v for k, v in raw_t.items()}
+
         if out_p.suffix.lower() == ".epub":
             pptx_to_epub(
                 args.presentation,
@@ -174,6 +181,7 @@ def main():
                 title=args.title,
                 author=args.author,
                 lang=args.lang,
+                transcriptions=transcriptions_dict,
                 use_heading_stack=use_stack,
                 filter_repetitive=filter_rep
             )
@@ -182,6 +190,7 @@ def main():
             res = parse_presentation(
                 args.presentation,
                 figures_dir=args.figures,
+                transcriptions=transcriptions_dict,
                 use_heading_stack=use_stack,
                 filter_repetitive=filter_rep
             )

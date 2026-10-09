@@ -13,7 +13,11 @@ A vision-first, parallel multi-agent skill for converting complex PDF documents 
 
 1. **Portable & Repository-Agnostic**: Self-contained within `~/.gemini/config/skills/pdf-to-epub/`. Does not depend on external frameworks or specific repository setups.
 2. **Adaptive Visual Grid Sampling (Collage Probing)**:
-   - Probes page density starting with **3x3** (9 pages/view) -> **2x2** (4 pages/view) -> **1x1** (single-page high resolution).
+   - Probes page density starting with **3x3** (9 pages/view) -> **3x2** (6 widescreen 16:9 slides/view) -> **2x2** (4 pages/view) -> **1x1** (single-page high resolution).
+   - **3x2 Widescreen Grid (Optimal for Slide Decks)**:
+     - Arranges 6 widescreen (16:9) slides 3 columns across by 2 rows down ($48:18$ / $8:3$ aspect ratio).
+     - Because lecture presentation fonts are large (20–36pt), rendering at 120–140 DPI preserves 100% legibility of all mathematical sub/superscripts and matrix entries while saving 33% on token costs and subagent roundtrips compared to 2x2.
+     - **Slide Unhiding**: Automatically unhides slides marked `show="0"` before headless LibreOffice export, guaranteeing strict 1:1 slide-to-page alignment with zero drift.
    - Determines the highest page density that allows 100% reliable text, diagram, and equation reading.
 3. **Hierarchical Range Partitioning with Parallel Subagents**:
    - The **Coordinator Agent** probes resolution, scans the Table of Contents (TOC), partitions the document into balanced page blocks, and dispatches parallel worker subagents using `invoke_subagent`.
@@ -30,8 +34,8 @@ A vision-first, parallel multi-agent skill for converting complex PDF documents 
 ## Bundled Helper Utilities
 
 The skill bundles standalone Python scripts located at `~/.gemini/config/skills/pdf-to-epub/scripts/`:
-- `pptx_parser.py`: Direct PowerPoint (PPTX / PPT) to Markdown & EPUB3 extraction engine with OCR.
-- `collage_maker.py`: Adaptive visual grid collage generator and region cropper (supports PDF, PPTX, PPT).
+- `pptx_parser.py`: Direct PowerPoint (PPTX / PPT) to Markdown & EPUB3 extraction engine with DLA.
+- `collage_maker.py`: Adaptive visual grid collage generator and region cropper (supports PDF, PPTX, PPT with 3x2, 2x2, 3x3).
 - `epub_packager.py`: Self-contained EPUB3 compiler with native W3C MathML and single/multi-flow layout.
 - `verify_fidelity.py`: Line-by-line quality and fidelity verifier with sentence alignment coverage.
 - `cli.py`: Unified command-line interface (`pdf-to-epub`).
@@ -44,15 +48,16 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.
     --title "Course Module Title" \
     --author "Professor Name"
 
-# Extract presentation to Markdown with DLA manifest and purged footers/headers
+# Extract presentation to Markdown with DLA manifest, purged footers/headers, and LaTeX equations
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.pptx \
     -o presentation.md \
     --figures figures/ \
-    --manifest dla_manifest.json
+    --manifest dla_manifest.json \
+    --transcriptions transcriptions.json
 ```
 - **Document Layout Analysis (DLA)**: Intelligently classifies shapes into text, tables, diagram figures, and equation blocks.
 - **Repetitive Header & Footer Purging**: Scans margin regions (top 15%, bottom 15%) across slides and removes repeating institutional text, professor names, course codes, and slide numbers.
-- **Heading Stack State Machine**: Groups continuation slides under the same semantic topic (H1 -> H2 -> H3), preventing artificial 1-slide page breaks and creating cohesive textbook chapters.
+- **Heading Stack State Machine**: Thematically clusters continuation slides into coherent textbook chapters (H1 -> H2 -> continuations), preventing artificial 1-slide page breaks and tiny 2-sentence chapters.
 - **Multimodal Vision Routing**: Routes complex mathematical formulas and text graphics to Vision LLMs for LaTeX MathML transcription, while embedding diagrams/illustrations as-is. Replaces noisy pytesseract OCR.
 
 ### 2. `collage_maker.py`
@@ -60,9 +65,9 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.
 # 1. Get total page/slide count
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py count document.pdf
 
-# 2. Render visual collage grid (3x3, 2x2, or 1x1) - works on PDF and PPTX/PPT
-python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py collage document.pdf \
-    --start 1 --end 9 --grid 3x3 -o /tmp/probe_3x3.png --dpi 120
+# 2. Render visual collage grid (3x2 for slides, 3x3 or 2x2 for books/papers)
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py collage presentation.pptx \
+    --start 1 --end 6 --grid 3x2 -o /tmp/probe_3x2.png --dpi 140
 
 # 3. Crop figure/equation bounding box from high-res page (coords: ymin,xmin,ymax,xmax in 0-1000 or 0.0-1.0)
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py crop document.pdf \

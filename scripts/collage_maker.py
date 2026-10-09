@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 def resolve_document_pdf(doc_path: str) -> str:
     """
     If input is PPTX or PPT, automatically convert to cached PDF via LibreOffice.
+    Unhides all hidden slides to guarantee 1:1 slide-to-page alignment.
     Returns the path to a readable PDF.
     """
     p = Path(doc_path).resolve()
@@ -29,11 +30,37 @@ def resolve_document_pdf(doc_path: str) -> str:
         file_hash = hashlib.md5(f"{p}:{stat.st_mtime}".encode()).hexdigest()[:12]
         cached_pdf = cache_dir / f"{p.stem}_{file_hash}.pdf"
         if not cached_pdf.exists():
-            cmd = ["soffice", "--headless", "--convert-to", "pdf", str(p), "--outdir", str(cache_dir)]
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            out_pdf = cache_dir / f"{p.stem}.pdf"
-            if out_pdf.exists():
-                out_pdf.rename(cached_pdf)
+            target_to_convert = str(p)
+            tmp_pptx = None
+            if p.suffix.lower() == ".pptx":
+                try:
+                    import pptx
+                    prs = pptx.Presentation(str(p))
+                    has_hidden = any('show' in s.element.attrib for s in prs.slides)
+                    if has_hidden:
+                        for s in prs.slides:
+                            if 'show' in s.element.attrib:
+                                del s.element.attrib['show']
+                        tmp_pptx = tempfile.NamedTemporaryFile("wb", suffix=".pptx", delete=False)
+                        prs.save(tmp_pptx.name)
+                        tmp_pptx.close()
+                        target_to_convert = tmp_pptx.name
+                except Exception:
+                    pass
+
+            try:
+                cmd = ["soffice", "--headless", "--convert-to", "pdf", target_to_convert, "--outdir", str(cache_dir)]
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                out_name = Path(target_to_convert).stem + ".pdf"
+                out_pdf = cache_dir / out_name
+                if out_pdf.exists():
+                    out_pdf.rename(cached_pdf)
+            finally:
+                if tmp_pptx and os.path.exists(tmp_pptx.name):
+                    try:
+                        os.remove(tmp_pptx.name)
+                    except Exception:
+                        pass
         if cached_pdf.exists():
             return str(cached_pdf)
     return str(p)
@@ -146,9 +173,11 @@ def create_collage(pdf_path: str, start_page: int, end_page: int, grid_mode: str
     grid_map = {
         "1x1": (1, 1),
         "2x2": (2, 2),
+        "3x2": (3, 2),  # 3 columns x 2 rows = 6 slides (optimal for widescreen 16:9 slide decks)
+        "2x3": (2, 3),  # 2 columns x 3 rows = 6 pages
         "3x3": (3, 3)
     }
-    cols, rows = grid_map.get(grid_mode, (3, 3))
+    cols, rows = grid_map.get(grid_mode, (3, 2) if "3x2" in grid_mode else (3, 3))
     max_pages = cols * rows
 
     actual_end = min(end_page, start_page + max_pages - 1)
@@ -231,7 +260,7 @@ def main():
     col_p.add_argument("pdf", help="Path to PDF file")
     col_p.add_argument("--start", "-s", type=int, default=1, help="Start page (1-indexed)")
     col_p.add_argument("--end", "-e", type=int, default=9, help="End page (inclusive)")
-    col_p.add_argument("--grid", "-g", choices=["3x3", "2x2", "1x1"], default="3x3", help="Grid configuration")
+    col_p.add_argument("--grid", "-g", choices=["3x3", "3x2", "2x3", "2x2", "1x1"], default="3x3", help="Grid configuration (3x2 is optimal for widescreen 16:9 slides)")
     col_p.add_argument("--output", "-o", required=True, help="Output image file path (.png)")
     col_p.add_argument("--dpi", type=int, default=120, help="Rendering DPI (default: 120)")
 
