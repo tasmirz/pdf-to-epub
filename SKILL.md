@@ -36,19 +36,24 @@ The skill bundles standalone Python scripts located at `~/.gemini/config/skills/
 - `verify_fidelity.py`: Line-by-line quality and fidelity verifier with sentence alignment coverage.
 - `cli.py`: Unified command-line interface (`pdf-to-epub`).
 
-### 1. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown)
+### 1. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown with DLA)
 ```bash
-# Convert PPTX or legacy PPT directly into reflowable EPUB3
+# Convert PPTX or legacy PPT directly into reflowable EPUB3 using DLA & Heading Stack
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.pptx \
     -o presentation.epub \
     --title "Course Module Title" \
     --author "Professor Name"
 
-# Extract presentation to Markdown with extracted figures and OCR
+# Extract presentation to Markdown with DLA manifest and purged footers/headers
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.pptx \
     -o presentation.md \
-    --figures figures/
+    --figures figures/ \
+    --manifest dla_manifest.json
 ```
+- **Document Layout Analysis (DLA)**: Intelligently classifies shapes into text, tables, diagram figures, and equation blocks.
+- **Repetitive Header & Footer Purging**: Scans margin regions (top 15%, bottom 15%) across slides and removes repeating institutional text, professor names, course codes, and slide numbers.
+- **Heading Stack State Machine**: Groups continuation slides under the same semantic topic (H1 -> H2 -> H3), preventing artificial 1-slide page breaks and creating cohesive textbook chapters.
+- **Multimodal Vision Routing**: Routes complex mathematical formulas and text graphics to Vision LLMs for LaTeX MathML transcription, while embedding diagrams/illustrations as-is. Replaces noisy pytesseract OCR.
 
 ### 2. `collage_maker.py`
 ```bash

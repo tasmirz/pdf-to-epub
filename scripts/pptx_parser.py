@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 """
 pdf-to-epub: pptx_parser.py
-High-fidelity PowerPoint (PPTX / PPT) to Markdown & EPUB3 extraction engine.
-Supports slide hierarchies, bullet points, tables, embedded pictures,
-vector diagrams, OLE equations, speaker notes, and OCR for image-based slides.
+High-fidelity PowerPoint (PPTX / PPT) to Markdown & EPUB3 conversion engine.
+
+Features:
+- DLA (Document Layout Analysis) for intelligent region classification.
+- Repetitive header & footer detection and filtering (purges redundant instructor
+  names, slide counters, dates, and course titles).
+- Heading Stack state machine: groups continuation slides under cohesive topics
+  (H1 -> H2 -> H3) to prevent artificial 1-slide page breaks.
+- Vision routing: differentiates between visual diagrams (kept as-is) and
+  mathematical equations/text graphics.
+- High-resolution equation cropping: replaces broken equation glyphs (• []) with
+  crisp vector/raster formulas or LaTeX MathML.
+- No pytesseract dependency: relies on DLA layout heuristics and Multimodal Vision.
 """
 
 import argparse
 import io
+import json
 import os
 import re
 import shutil
@@ -21,16 +32,30 @@ import pptx
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 from PIL import Image
 
-# Try importing pytesseract for OCR
+# Import DLA Engine
 try:
-    import pytesseract
-    HAS_OCR = True
+    from dla_analyzer import (
+        RepetitivePatternDetector,
+        HeadingStack,
+        DLAClassifier,
+        ElementType,
+        ActionType,
+        EQUATION_GLYPH_REGEX
+    )
 except ImportError:
-    HAS_OCR = False
+    # If run standalone from other path
+    from scripts.dla_analyzer import (
+        RepetitivePatternDetector,
+        HeadingStack,
+        DLAClassifier,
+        ElementType,
+        ActionType,
+        EQUATION_GLYPH_REGEX
+    )
 
-# Try importing PyMuPDF for PDF rendering/fallback
+# Try importing PyMuPDF for high-res slide rendering and equation cropping
 try:
-    import fitz
+    import fitz  # pymupdf
     HAS_PYMUPDF = True
 except ImportError:
     HAS_PYMUPDF = False
@@ -69,7 +94,7 @@ def ensure_pptx(file_path: str) -> Tuple[str, Optional[str]]:
 def convert_presentation_to_pdf(presentation_path: str, output_pdf_dir: Optional[str] = None) -> str:
     """
     Convert presentation (PPT/PPTX) to PDF using LibreOffice headless.
-    Useful for rendering full-slide visual layouts, OLE objects, and complex diagrams.
+    Used for rendering high-res slide figures, OLE equations, and visual layout probes.
     """
     out_dir = output_pdf_dir or tempfile.mkdtemp(prefix="pptx_pdf_")
     cmd = [
@@ -91,27 +116,9 @@ def convert_presentation_to_pdf(presentation_path: str, output_pdf_dir: Optional
 
 
 def clean_bullet_symbol(text: str) -> str:
-    """Clean special bullet characters (Wingdings, Private Use Area chars like \\uf06c)."""
-    # Common bullet icons in PowerPoint fonts:
+    """Clean special bullet characters (Wingdings, Private Use Area chars)."""
     text = re.sub(r"^[\uf06c\uf0a7\uf0d8\u2022\u25cf\u25cb\u25aa\u25ab\u25ba\u2192\-\*]\s*", "", text)
     return text.strip()
-
-
-def run_ocr_on_image(image_bytes: bytes, lang: str = "eng") -> str:
-    """Run OCR on image bytes using pytesseract if available."""
-    if not HAS_OCR:
-        return ""
-    try:
-        img = Image.open(io.BytesIO(image_bytes))
-        # Preprocess if tiny
-        w, h = img.size
-        if w < 300 or h < 300:
-            img = img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
-        text = pytesseract.image_to_string(img, lang=lang)
-        cleaned = "\n".join(line.strip() for line in text.splitlines() if line.strip())
-        return cleaned
-    except Exception:
-        return ""
 
 
 def extract_shapes_recursive(shapes):
@@ -136,7 +143,6 @@ def table_to_markdown(table) -> str:
         for cell in row.cells:
             cell_txt = " ".join(cell.text.split()).replace("|", "\\|")
             row_vals.append(cell_txt)
-        # Pad if ragged
         while len(row_vals) < max_cols:
             row_vals.append("")
         rows.append(row_vals)
@@ -161,25 +167,27 @@ def table_to_markdown(table) -> str:
 def parse_presentation(
     pptx_path: str,
     figures_dir: Optional[str] = None,
-    ocr: bool = True,
-    ocr_lang: str = "eng",
-    render_complex_slides: bool = True
+    transcriptions: Optional[Dict[int, str]] = None,
+    use_heading_stack: bool = True,
+    filter_repetitive: bool = True
 ) -> Dict[str, Any]:
     """
-    Parse a PowerPoint file into rich Markdown, extracted figures, and metadata.
+    Parse a PowerPoint presentation with Document Layout Analysis (DLA).
+
+    Args:
+        pptx_path: Path to presentation.
+        figures_dir: Output directory for figures.
+        transcriptions: Optional dict mapping slide_idx -> LaTeX/Markdown transcribed by Vision model.
+        use_heading_stack: If True, merges consecutive slides under semantic H1/H2 chapters.
+        filter_repetitive: If True, purges recurring footers, headers, and slide numbers.
+
     Returns:
-    {
-        "title": str,
-        "markdown": str,
-        "figures": List[str],
-        "events": List[Dict],
-        "slide_count": int,
-        "ocr_performed": int
-    }
+        Dict with keys: 'title', 'markdown', 'figures', 'events', 'slide_count', 'dla_manifest'.
     """
     actual_pptx, cleanup_dir = ensure_pptx(pptx_path)
     prs = pptx.Presentation(actual_pptx)
     slide_count = len(prs.slides)
+    slide_height = float(prs.slide_height) if prs.slide_height else 5400000.0
 
     fig_out = Path(figures_dir).resolve() if figures_dir else (Path(pptx_path).parent / "figures")
     fig_out.mkdir(parents=True, exist_ok=True)
@@ -187,21 +195,37 @@ def parse_presentation(
     extracted_figures = []
     events = []
     md_sections = []
-    ocr_count = 0
+    dla_manifest = []
 
-    # Determine document title
+    # 1. Pass 1: Repetitive Header & Footer Detection
+    pattern_detector = RepetitivePatternDetector()
+    if filter_repetitive:
+        slides_text_pos = []
+        for slide in prs.slides:
+            slide_items = []
+            for shape in extract_shapes_recursive(slide.shapes):
+                if shape.has_text_frame:
+                    t_str = shape.text_frame.text.strip()
+                    if t_str:
+                        top_r = float(shape.top) / slide_height if shape.top is not None else 0.5
+                        bot_r = float(shape.top + shape.height) / slide_height if (shape.top is not None and shape.height is not None) else 0.5
+                        slide_items.append({
+                            "text": t_str,
+                            "top_ratio": top_r,
+                            "bottom_ratio": bot_r
+                        })
+            slides_text_pos.append(slide_items)
+        pattern_detector.scan_presentation_candidates(slides_text_pos)
+
+    # 2. Document Title
     doc_title = Path(pptx_path).stem
-    first_slide_title = ""
     if prs.slides:
         s0 = prs.slides[0]
         if s0.shapes.title and s0.shapes.title.text.strip():
-            first_slide_title = s0.shapes.title.text.strip().replace("\n", " ")
-
-    if first_slide_title:
-        doc_title = first_slide_title
+            doc_title = s0.shapes.title.text.strip().replace("\n", " ")
     doc_title = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", doc_title).strip()
 
-    # Convert to PDF in background if complex slides/OLE objects exist or for slide crops
+    # 3. PDF Fallback for High-Res Equation Crops & Renderings
     pdf_backup_path = None
     pdf_doc = None
     try:
@@ -212,7 +236,10 @@ def parse_presentation(
         pdf_backup_path = None
         pdf_doc = None
 
-    # Process each slide sequentially
+    # 4. Heading Stack Initialization
+    heading_stack = HeadingStack()
+
+    # 5. Pass 2: Slide Extraction & DLA Processing
     for s_idx, slide in enumerate(prs.slides, 1):
         slide_title = ""
         slide_text_blocks = []
@@ -220,18 +247,17 @@ def parse_presentation(
         slide_tables = []
         has_ole = False
 
-        # 1. Detect Slide Title
+        # Detect Title
         if slide.shapes.title and slide.shapes.title.text.strip():
             slide_title = slide.shapes.title.text.strip().replace("\n", " ")
             slide_title = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", slide_title).strip()
 
-        # 2. Extract Shapes
+        # Extract Shapes
         for shape in extract_shapes_recursive(slide.shapes):
-            # Check if this is the title shape
             if shape == slide.shapes.title:
                 continue
 
-            # Skip header / footer / slide number placeholders
+            # Standard Placeholder Filtering
             if shape.is_placeholder:
                 try:
                     ph_type = shape.placeholder_format.type
@@ -240,24 +266,26 @@ def parse_presentation(
                 except Exception:
                     pass
 
-            # Embedded OLE objects (e.g. equations, charts)
+            top_r = float(shape.top) / slide_height if shape.top is not None else 0.5
+            bot_r = float(shape.top + shape.height) / slide_height if (shape.top is not None and shape.height is not None) else 0.5
+
+            # OLE Equation Objects
             if shape.shape_type == MSO_SHAPE_TYPE.EMBEDDED_OLE_OBJECT:
                 has_ole = True
 
-            # Table
+            # Table Shape
             if shape.has_table:
                 tbl_md = table_to_markdown(shape.table)
                 if tbl_md.strip():
                     slide_tables.append(tbl_md)
                 continue
 
-            # Picture
+            # Picture Shape
             if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 try:
                     blob = shape.image.blob
                     ext = shape.image.ext.lower()
                     if ext not in ["png", "jpg", "jpeg", "svg", "webp", "gif"]:
-                        # Convert to PNG using Pillow
                         try:
                             im = Image.open(io.BytesIO(blob))
                             buf = io.BytesIO()
@@ -270,12 +298,12 @@ def parse_presentation(
                     img_path = fig_out / img_name
                     img_path.write_bytes(blob)
                     extracted_figures.append(img_name)
-                    slide_images.append((img_name, blob))
+                    slide_images.append((img_name, blob, shape.width, shape.height))
                 except Exception:
                     pass
                 continue
 
-            # Text frame
+            # Text Frame
             if shape.has_text_frame:
                 txt_f = shape.text_frame
                 tf_paragraphs = []
@@ -283,8 +311,9 @@ def parse_presentation(
                     p_text = clean_bullet_symbol(p.text)
                     if not p_text:
                         continue
-                    # Ignore pure slide numbers or repeated footer text
-                    if re.match(r"^\d{1,3}$", p_text) and len(p_text) <= 3:
+
+                    # Filter repetitive headers/footers
+                    if filter_repetitive and pattern_detector.is_repetitive(p_text, top_r, bot_r):
                         continue
 
                     # If no slide title was found yet, use first prominent text
@@ -292,18 +321,22 @@ def parse_presentation(
                         slide_title = p_text
                         continue
 
-                    # Markdown bullet formatting based on level
+                    # Markdown bullet formatting
                     indent = "  " * p.level
-                    # Clean control characters (like \x0b vertical tab from Shift+Enter)
-                    cleaned_p_text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", p_text).strip()
+                    cleaned_p = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", p_text).strip()
 
-                    # Check bold / italic at paragraph level if all non-empty runs share style
-                    styled_text = cleaned_p_text
+                    # Bold / italic run preservation
+                    styled_text = cleaned_p
                     non_empty_runs = [r for r in p.runs if r.text.strip()]
                     if non_empty_runs and all(r.font.bold for r in non_empty_runs):
-                        styled_text = f"**{cleaned_p_text}**"
+                        styled_text = f"**{cleaned_p}**"
                     elif non_empty_runs and all(r.font.italic for r in non_empty_runs):
-                        styled_text = f"*{cleaned_p_text}*"
+                        styled_text = f"*{cleaned_p}*"
+
+                    # Check for broken equation glyphs in native text
+                    if EQUATION_GLYPH_REGEX.search(cleaned_p):
+                        has_ole = True
+                        continue
 
                     if p.level > 0 or len(txt_f.paragraphs) > 1:
                         tf_paragraphs.append(f"{indent}- {styled_text}")
@@ -313,7 +346,7 @@ def parse_presentation(
                 if tf_paragraphs:
                     slide_text_blocks.append("\n".join(tf_paragraphs))
 
-        # Check speaker notes
+        # Speaker notes
         speaker_notes = ""
         try:
             if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
@@ -323,70 +356,104 @@ def parse_presentation(
         except Exception:
             pass
 
-        # If slide title still empty, synthesize one
         if not slide_title:
-            slide_title = f"Slide {s_idx}"
+            slide_title = f"Topic {s_idx}"
 
-        slide_heading = f"# Slide {s_idx}: {slide_title}"
-        events.append({"type": "heading", "level": 1, "title": f"Slide {s_idx}: {slide_title}", "page": s_idx})
+        # 6. Apply Heading Stack State Machine
+        if use_heading_stack:
+            heading_info = heading_stack.process_slide(slide_title, s_idx)
+            heading_md = heading_info["heading_markdown"]
+            if heading_info["is_new_h1"]:
+                events.append({
+                    "type": "heading",
+                    "level": 1,
+                    "title": heading_info["h1_title"],
+                    "page": s_idx
+                })
+        else:
+            heading_md = f"# Slide {s_idx}: {slide_title}"
+            events.append({
+                "type": "heading",
+                "level": 1,
+                "title": f"Slide {s_idx}: {slide_title}",
+                "page": s_idx
+            })
 
-        section_lines = [slide_heading, ""]
+        section_lines = []
+        if heading_md.strip():
+            section_lines.append(heading_md)
+            section_lines.append("")
 
-        # If the slide had OLE objects or if text is sparse, check PDF fallback text
-        pdf_fallback_text = ""
-        if pdf_doc and s_idx <= len(pdf_doc):
-            try:
-                p_page = pdf_doc[s_idx - 1]
-                p_text = p_page.get_text()
-                # If OLE objects exist, pdf_text often captures equations missed by python-pptx!
-                if has_ole and p_text:
-                    pdf_fallback_text = p_text.strip()
-            except Exception:
-                pass
+        # Anchor for navigation and traceability
+        section_lines.append(f'<span id="slide-{s_idx}" class="slide-ref"></span>')
+        section_lines.append("")
 
-        # Text blocks
-        if slide_text_blocks:
-            for b in slide_text_blocks:
-                section_lines.append(b)
-                section_lines.append("")
+        # Native text blocks
+        for b in slide_text_blocks:
+            section_lines.append(b)
+            section_lines.append("")
 
         # Tables
         for tbl in slide_tables:
             section_lines.append(tbl)
             section_lines.append("")
 
-        # Images & OCR
-        total_native_text_len = sum(len(b) for b in slide_text_blocks)
-        for img_name, img_bytes in slide_images:
-            section_lines.append(f"![Illustration for Slide {s_idx}](figures/{img_name})")
-            section_lines.append("")
+        # DLA Image & Vision Classification
+        total_text_len = sum(len(b) for b in slide_text_blocks)
+        for img_name, img_bytes, w, h in slide_images:
+            elem_type, action = DLAClassifier.inspect_image(
+                image_bytes=img_bytes,
+                slide_text_len=total_text_len,
+                has_ole_on_slide=has_ole,
+                image_width=w or 0,
+                image_height=h or 0
+            )
 
-            # Smart OCR: Run when slide text is sparse (< 60 chars) or for diagram images
-            if ocr and HAS_OCR:
-                should_ocr = (total_native_text_len < 60)
-                if not should_ocr:
-                    try:
-                        im_probe = Image.open(io.BytesIO(img_bytes))
-                        # Only OCR if image is large enough to be a diagram / text capture
-                        should_ocr = (im_probe.width >= 400 and im_probe.height >= 250)
-                    except Exception:
-                        should_ocr = False
+            dla_manifest.append({
+                "slide": s_idx,
+                "image": img_name,
+                "type": elem_type.value,
+                "action": action.value
+            })
 
-                if should_ocr:
-                    ocr_text = run_ocr_on_image(img_bytes, lang=ocr_lang)
-                    if ocr_text and len(ocr_text) > 15:
-                        ocr_count += 1
-                        # Avoid duplicate if OCR matches native text
-                        if ocr_text.lower() not in " ".join(slide_text_blocks).lower():
-                            section_lines.append(f"**Extracted Text from Slide Image:**\n")
-                            # Format as quote block and sanitize delimiter artifacts
-                            for oline in ocr_text.splitlines():
-                                clean_ol = re.sub(r"\\([()\[\]])", r"\1", oline)
-                                section_lines.append(f"> {clean_ol}")
-                            section_lines.append("")
+            # Check if vision transcription is available for this slide
+            if transcriptions and s_idx in transcriptions:
+                # Transcribed LaTeX/Markdown replaces or accompanies figure
+                section_lines.append(f"![Illustration](figures/{img_name})")
+                section_lines.append("")
+                section_lines.append(transcriptions[s_idx])
+                section_lines.append("")
+            else:
+                # Embed diagram as-is
+                section_lines.append(f"![Illustration for Slide {s_idx}](figures/{img_name})")
+                section_lines.append("")
 
-        # If slide had NO native text and NO extracted images, but PDF fallback has a page:
-        if total_native_text_len == 0 and not slide_images and pdf_doc and s_idx <= len(pdf_doc):
+        # Handle Equations / Complex Slides with OLE objects
+        if has_ole:
+            dla_manifest.append({
+                "slide": s_idx,
+                "type": "equation_block",
+                "action": "transcribe_latex"
+            })
+            if transcriptions and s_idx in transcriptions:
+                section_lines.append(transcriptions[s_idx])
+                section_lines.append("")
+            elif pdf_doc and s_idx <= len(pdf_doc):
+                # High-res visual crop fallback: crop equation from rendered slide
+                try:
+                    p_page = pdf_doc[s_idx - 1]
+                    pix = p_page.get_pixmap(dpi=200)
+                    crop_name = f"eq_s{s_idx:02d}.png"
+                    crop_path = fig_out / crop_name
+                    pix.save(str(crop_path))
+                    extracted_figures.append(crop_name)
+                    section_lines.append(f"![Mathematical Formula](figures/{crop_name})")
+                    section_lines.append("")
+                except Exception:
+                    pass
+
+        # If slide was completely empty (scanned slide or pure graphic)
+        if total_text_len == 0 and not slide_images and pdf_doc and s_idx <= len(pdf_doc):
             try:
                 p_page = pdf_doc[s_idx - 1]
                 pix = p_page.get_pixmap(dpi=150)
@@ -396,29 +463,16 @@ def parse_presentation(
                 extracted_figures.append(img_name)
                 section_lines.append(f"![Slide {s_idx} Full View](figures/{img_name})")
                 section_lines.append("")
-                if ocr and HAS_OCR:
-                    ocr_text = run_ocr_on_image(img_path.read_bytes(), lang=ocr_lang)
-                    if ocr_text:
-                        ocr_count += 1
-                        section_lines.append(f"**Extracted Text:**\n")
-                        for oline in ocr_text.splitlines():
-                            clean_ol = re.sub(r"\\([()\[\]])", r"\1", oline)
-                            section_lines.append(f"> {clean_ol}")
-                        section_lines.append("")
+                dla_manifest.append({
+                    "slide": s_idx,
+                    "image": img_name,
+                    "type": "transcribe_candidate",
+                    "action": "transcribe_vision"
+                })
             except Exception:
                 pass
 
-        # If PDF has extra text (like OLE equations) not present in native text, append it
-        if pdf_fallback_text and has_ole:
-            clean_pdf_lines = [re.sub(r"\\([()\[\]])", r"\1", l).strip() for l in pdf_fallback_text.splitlines() if l.strip()]
-            new_lines = [l for l in clean_pdf_lines if l.lower() not in " ".join(slide_text_blocks).lower()]
-            if new_lines and len(new_lines) > 2:
-                section_lines.append("**Supplementary Content & Formulas:**\n")
-                for nl in new_lines:
-                    section_lines.append(f"- {nl}")
-                section_lines.append("")
-
-        # Speaker Notes
+        # Speaker notes
         if speaker_notes:
             section_lines.append(f"> **Notes:** {speaker_notes}\n")
 
@@ -429,8 +483,6 @@ def parse_presentation(
     if cleanup_dir:
         shutil.rmtree(cleanup_dir, ignore_errors=True)
 
-    # Append events metadata block
-    import json
     events_json = json.dumps(events, indent=2)
     final_md = "\n\n".join(md_sections) + f"\n\n```events\n{events_json}\n```\n"
 
@@ -440,7 +492,7 @@ def parse_presentation(
         "figures": extracted_figures,
         "events": events,
         "slide_count": slide_count,
-        "ocr_performed": ocr_count
+        "dla_manifest": dla_manifest
     }
 
 
@@ -451,66 +503,86 @@ def pptx_to_epub(
     title: Optional[str] = None,
     author: Optional[str] = "Course Instructor",
     lang: str = "en",
-    ocr: bool = True
+    transcriptions: Optional[Dict[int, str]] = None,
+    use_heading_stack: bool = True,
+    filter_repetitive: bool = True
 ) -> str:
     """
-    Direct end-to-end PowerPoint to EPUB3 converter.
+    Directly converts PowerPoint presentation to EPUB3 using DLA and Heading Stack.
     """
     from epub_packager import build_epub3
 
-    p = Path(pptx_path).resolve()
-    fig_dir = Path(figures_dir).resolve() if figures_dir else (p.parent / f"{p.stem}_figures")
-    fig_dir.mkdir(parents=True, exist_ok=True)
-
-    result = parse_presentation(str(p), figures_dir=str(fig_dir), ocr=ocr)
-
-    book_title = title or result["title"]
-    md_temp = fig_dir / f"{p.stem}.md"
-    md_temp.write_text(result["markdown"], encoding="utf-8")
-
-    build_epub3(
-        markdown_path=str(md_temp),
-        output_epub=output_epub,
-        figures_dir=str(fig_dir),
-        title=book_title,
-        author=author or "Course Instructor",
-        lang=lang,
-        split_mode="h1"
+    res = parse_presentation(
+        pptx_path=pptx_path,
+        figures_dir=figures_dir,
+        transcriptions=transcriptions,
+        use_heading_stack=use_heading_stack,
+        filter_repetitive=filter_repetitive
     )
 
-    return output_epub
+    doc_title = title or res["title"]
+    fig_dir = figures_dir or (Path(pptx_path).parent / "figures")
+
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+        f.write(res["markdown"])
+        temp_md = f.name
+
+    try:
+        out_path = Path(output_epub).resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        build_epub3(
+            markdown_path=temp_md,
+            output_epub=str(out_path),
+            figures_dir=str(fig_dir),
+            title=doc_title,
+            author=author,
+            lang=lang
+        )
+        return str(out_path)
+    finally:
+        if os.path.exists(temp_md):
+            os.remove(temp_md)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PowerPoint (PPTX / PPT) to Markdown & EPUB3 Converter")
+    parser = argparse.ArgumentParser(description="PowerPoint to Markdown/EPUB3 Converter with DLA")
     parser.add_argument("presentation", help="Path to input presentation (.pptx or .ppt)")
-    parser.add_argument("-o", "--output", required=True, help="Output file (.md or .epub)")
+    parser.add_argument("-o", "--output", required=True, help="Output file (.epub or .md)")
     parser.add_argument("--figures", help="Directory to save extracted figure assets")
-    parser.add_argument("--title", help="Custom book/document title")
+    parser.add_argument("--title", help="Custom document title")
     parser.add_argument("--author", default="Course Instructor", help="Author name")
     parser.add_argument("--lang", default="en", help="Language code")
-    parser.add_argument("--no-ocr", action="store_true", help="Disable OCR for image slides")
+    parser.add_argument("--no-heading-stack", action="store_true", help="Disable heading stack (split every slide)")
+    parser.add_argument("--no-filter-repetitive", action="store_true", help="Disable repetitive footer/header filtering")
+    parser.add_argument("--manifest", help="Optional path to output DLA manifest JSON")
 
     args = parser.parse_args()
-    out_path = Path(args.output).resolve()
+    out_p = Path(args.output).resolve()
 
-    if out_path.suffix.lower() == ".epub":
+    if out_p.suffix.lower() == ".epub":
         pptx_to_epub(
             pptx_path=args.presentation,
-            output_epub=str(out_path),
+            output_epub=str(out_p),
             figures_dir=args.figures,
             title=args.title,
             author=args.author,
             lang=args.lang,
-            ocr=not args.no_ocr
+            use_heading_stack=not args.no_heading_stack,
+            filter_repetitive=not args.no_filter_repetitive
         )
-        print(f"[OK] Successfully converted presentation to EPUB3: {out_path}")
+        print(f"[OK] Converted {args.presentation} -> EPUB: {out_p}")
     else:
-        fig_dir = args.figures or str(out_path.parent / "figures")
-        res = parse_presentation(args.presentation, figures_dir=fig_dir, ocr=not args.no_ocr)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(res["markdown"], encoding="utf-8")
-        print(f"[OK] Extracted Markdown: {out_path} ({res['slide_count']} slides, {len(res['figures'])} figures, {res['ocr_performed']} OCR operations)")
+        res = parse_presentation(
+            pptx_path=args.presentation,
+            figures_dir=args.figures,
+            use_heading_stack=not args.no_heading_stack,
+            filter_repetitive=not args.no_filter_repetitive
+        )
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(res["markdown"], encoding="utf-8")
+        if args.manifest:
+            Path(args.manifest).write_text(json.dumps(res["dla_manifest"], indent=2), encoding="utf-8")
+        print(f"[OK] Extracted {args.presentation} -> Markdown: {out_p}")
 
 
 if __name__ == "__main__":

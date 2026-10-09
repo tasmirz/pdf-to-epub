@@ -321,6 +321,10 @@ def markdown_to_xhtml(md_text: str) -> str:
         # 2. Escape XML entities on non-math text
         text = html.escape(text, quote=False)
 
+        # Allow safe inline tags: span, a, sub, sup, b, i, em, strong, br
+        text = re.sub(r"&lt;(span|a|sub|sup|b|i|em|strong)\b(.*?)&gt;(.*?)&lt;/\1&gt;", r"<\1\2>\3</\1>", text)
+        text = re.sub(r"&lt;br\s*/?&gt;", "<br/>", text)
+
         # 3. Images: ![alt](src)
         def replace_img(match):
             alt, src = match.group(1), match.group(2)
@@ -349,6 +353,16 @@ def markdown_to_xhtml(md_text: str) -> str:
     while idx < len(lines):
         line = lines[idx]
         stripped = line.strip()
+
+        # Raw HTML anchor / span tag block (e.g. <span id="..." class="..."></span>)
+        if re.match(r"^<(?:span|a|div)\s+id=[\"'][^\"']+[\"'][^>]*>.*?</(?:span|a|div)>$", stripped):
+            flush_p()
+            flush_list()
+            flush_blockquote()
+            flush_table()
+            xhtml_out.append(stripped)
+            idx += 1
+            continue
 
         # Code block fence ```
         if stripped.startswith("```"):

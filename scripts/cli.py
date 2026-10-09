@@ -120,14 +120,16 @@ def main():
     p_ver.add_argument("--json", help="Save output report as JSON file")
 
     # pptx
-    p_pptx = subparsers.add_parser("pptx", help="Convert PPTX/PPT presentation to EPUB3 or Markdown")
+    p_pptx = subparsers.add_parser("pptx", help="Convert PPTX/PPT presentation to EPUB3 or Markdown with DLA")
     p_pptx.add_argument("presentation", help="Path to input .pptx or .ppt presentation")
     p_pptx.add_argument("-o", "--output", required=True, help="Output .epub or .md file")
     p_pptx.add_argument("--figures", help="Directory to save extracted figure assets")
     p_pptx.add_argument("--title", help="Custom document title")
     p_pptx.add_argument("--author", default="Course Instructor", help="Author name")
     p_pptx.add_argument("--lang", default="en", help="Language code")
-    p_pptx.add_argument("--no-ocr", action="store_true", help="Disable OCR for image slides")
+    p_pptx.add_argument("--no-heading-stack", action="store_true", help="Disable heading stack (split every slide)")
+    p_pptx.add_argument("--no-filter-repetitive", action="store_true", help="Disable repetitive footer/header filtering")
+    p_pptx.add_argument("--manifest", help="Optional path to output DLA manifest JSON")
 
     # convert (universal)
     p_conv = subparsers.add_parser("convert", help="Universal converter for PDF, PPTX, and PPT to EPUB3")
@@ -137,7 +139,8 @@ def main():
     p_conv.add_argument("--author", default="Unknown Author", help="Author name")
     p_conv.add_argument("--lang", default="en", help="Language code")
     p_conv.add_argument("--figures", help="Directory of figure image assets")
-    p_conv.add_argument("--no-ocr", action="store_true", help="Disable OCR")
+    p_conv.add_argument("--no-heading-stack", action="store_true", help="Disable heading stack")
+    p_conv.add_argument("--no-filter-repetitive", action="store_true", help="Disable repetitive footer filtering")
 
     # install-skill
     subparsers.add_parser("install-skill", help="Install/link into Antigravity global skills directory")
@@ -161,20 +164,50 @@ def main():
     elif args.subcommand == "pptx":
         from pptx_parser import pptx_to_epub, parse_presentation
         out_p = Path(args.output).resolve()
+        use_stack = not getattr(args, "no_heading_stack", False)
+        filter_rep = not getattr(args, "no_filter_repetitive", False)
         if out_p.suffix.lower() == ".epub":
-            pptx_to_epub(args.presentation, str(out_p), figures_dir=args.figures, title=args.title, author=args.author, lang=args.lang, ocr=not args.no_ocr)
+            pptx_to_epub(
+                args.presentation,
+                str(out_p),
+                figures_dir=args.figures,
+                title=args.title,
+                author=args.author,
+                lang=args.lang,
+                use_heading_stack=use_stack,
+                filter_repetitive=filter_rep
+            )
             print(f"[OK] Converted presentation to EPUB: {out_p}")
         else:
-            res = parse_presentation(args.presentation, figures_dir=args.figures, ocr=not args.no_ocr)
+            res = parse_presentation(
+                args.presentation,
+                figures_dir=args.figures,
+                use_heading_stack=use_stack,
+                filter_repetitive=filter_rep
+            )
             out_p.parent.mkdir(parents=True, exist_ok=True)
             out_p.write_text(res["markdown"], encoding="utf-8")
+            if getattr(args, "manifest", None):
+                import json
+                Path(args.manifest).write_text(json.dumps(res["dla_manifest"], indent=2), encoding="utf-8")
             print(f"[OK] Extracted presentation to Markdown: {out_p}")
     elif args.subcommand == "convert":
         in_p = Path(args.input).resolve()
         out_p = Path(args.output).resolve()
+        use_stack = not getattr(args, "no_heading_stack", False)
+        filter_rep = not getattr(args, "no_filter_repetitive", False)
         if in_p.suffix.lower() in [".pptx", ".ppt"]:
             from pptx_parser import pptx_to_epub
-            pptx_to_epub(str(in_p), str(out_p), figures_dir=args.figures, title=args.title, author=args.author, lang=args.lang, ocr=not args.no_ocr)
+            pptx_to_epub(
+                str(in_p),
+                str(out_p),
+                figures_dir=args.figures,
+                title=args.title,
+                author=args.author,
+                lang=args.lang,
+                use_heading_stack=use_stack,
+                filter_repetitive=filter_rep
+            )
             print(f"[OK] Converted {in_p.name} to EPUB: {out_p}")
         elif in_p.suffix.lower() == ".md":
             from epub_packager import build_epub3
