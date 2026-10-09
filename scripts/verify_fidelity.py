@@ -85,6 +85,7 @@ def extract_pptx_sentences(pptx_path: str) -> Tuple[List[str], str]:
     p = Path(pptx_path).resolve()
     prs = pptx.Presentation(str(p))
     lines = []
+    sentences = []
     for s in prs.slides:
         for shp in s.shapes:
             if shp.is_placeholder:
@@ -97,14 +98,20 @@ def extract_pptx_sentences(pptx_path: str) -> Tuple[List[str], str]:
                 for p_elem in shp.text_frame.paragraphs:
                     t = p_elem.text.strip()
                     t = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", t).strip()
-                    if t and len(t) > 5 and not re.match(r"^\d{1,3}$", t):
-                        lines.append(t)
+                    if not t or len(t) < 15 or re.match(r"^\d{1,3}$", t):
+                        continue
+                    if re.search(r"prof\.\s*dr\.|cse,\s*kuet|department of|all rights reserved", t, re.I):
+                        continue
+                    lines.append(t)
+                    # For sentence coverage, split on punctuation per paragraph
+                    for sent in re.split(r"(?<=[.!?])\s+", t):
+                        s_clean = sent.strip()
+                        if len(s_clean) > 15 and not re.match(r"^\d+$", s_clean):
+                            # Skip pure broken equation glyph fragments in text
+                            if not re.search(r"[\uF000-\uF8FF√=×\*\^]", s_clean):
+                                sentences.append(s_clean)
     full_text = " ".join(lines)
     full_text = re.sub(r"\s+", " ", full_text).strip()
-    sentences = [
-        s.strip() for s in re.split(r"(?<=[.!?])\s+", full_text)
-        if len(s.strip()) > 15
-    ]
     return sentences, full_text
 
 

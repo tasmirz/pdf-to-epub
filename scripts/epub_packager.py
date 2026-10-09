@@ -215,11 +215,16 @@ li {
 
 
 def latex_to_mathml(latex_str: str, display: str = "inline") -> str:
-    """Convert LaTeX string to W3C MathML XML."""
+    """Convert LaTeX string to W3C MathML XML with strict entity validation."""
     raw_tex = latex_str.strip()
     try:
         import latex2mathml.converter
+        import xml.etree.ElementTree as ET
         mml = latex2mathml.converter.convert(raw_tex, display=display)
+        # Sanitize raw ampersands not already part of valid XML entities
+        mml = re.sub(r"&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)", "&amp;", mml)
+        # Validate well-formed XML
+        ET.fromstring(mml)
         if display == "block":
             return f'<div class="math display">{mml}</div>'
         else:
@@ -349,6 +354,19 @@ def markdown_to_xhtml(md_text: str) -> str:
 
         return text
 
+    def has_upcoming_list_item(curr_idx: int, pattern: str, max_lookahead: int = 6) -> bool:
+        for offset in range(1, max_lookahead + 1):
+            if curr_idx + offset >= len(lines):
+                break
+            l_str = lines[curr_idx + offset].strip()
+            if not l_str:
+                continue
+            if l_str.startswith("#"):
+                return False
+            if re.match(pattern, l_str):
+                return True
+        return False
+
     idx = 0
     while idx < len(lines):
         line = lines[idx]
@@ -357,7 +375,16 @@ def markdown_to_xhtml(md_text: str) -> str:
         # Raw HTML anchor / span tag block (e.g. <span id="..." class="..."></span>)
         if re.match(r"^<(?:span|a|div)\s+id=[\"'][^\"']+[\"'][^>]*>.*?</(?:span|a|div)>$", stripped):
             flush_p()
-            flush_list()
+            # If currently in an ordered or unordered list, do not break the list if followed by another list item
+            if in_ol or in_ul:
+                next_item = None
+                for lookahead in lines[idx + 1:]:
+                    ls = lookahead.strip()
+                    if ls:
+                        next_item = ls
+                        break
+                if not (next_item and (re.match(r"^\d+\.\s+", next_item) or re.match(r"^[-*]\s+", next_item))):
+                    flush_list()
             flush_blockquote()
             flush_table()
             xhtml_out.append(stripped)
@@ -385,16 +412,36 @@ def markdown_to_xhtml(md_text: str) -> str:
             idx += 1
             continue
 
-        # Display Math block $$
-        if stripped.startswith("$$") and stripped.endswith("$$") and len(stripped) > 2:
+        # Display Math block $$ (both single-line and multi-line block fence)
+        if stripped.startswith("$$"):
             flush_p()
             flush_list()
             flush_blockquote()
             flush_table()
-            math_content = stripped[2:-2].strip()
-            xhtml_out.append(latex_to_mathml(math_content, display="block"))
-            idx += 1
-            continue
+            if stripped.endswith("$$") and len(stripped) >= 4:
+                math_content = stripped[2:-2].strip()
+                xhtml_out.append(latex_to_mathml(math_content, display="block"))
+                idx += 1
+                continue
+            else:
+                # Multi-line display math block
+                math_lines = []
+                if len(stripped) > 2:
+                    math_lines.append(stripped[2:])
+                idx += 1
+                while idx < len(lines):
+                    m_line = lines[idx]
+                    m_str = m_line.strip()
+                    if m_str.endswith("$$"):
+                        if len(m_str) > 2:
+                            math_lines.append(m_str[:-2])
+                        idx += 1
+                        break
+                    math_lines.append(m_line)
+                    idx += 1
+                math_content = "\n".join(math_lines).strip()
+                xhtml_out.append(latex_to_mathml(math_content, display="block"))
+                continue
 
         # Horizontal Rule --- or *** or ___
         if re.match(r"^(\*{3,}|-{3,}|_{3,})$", stripped):
@@ -488,14 +535,18 @@ def markdown_to_xhtml(md_text: str) -> str:
             continue
 
         # Ordered list 1.
-        m_ol = re.match(r"^\d+\.\s+(.*)$", stripped)
+        m_ol = re.match(r"^(\d+)\.\s+(.*)$", stripped)
         if m_ol:
             flush_p()
+            start_num = int(m_ol.group(1))
             if not in_ol:
                 flush_list()
-                xhtml_out.append("<ol>")
+                if start_num > 1:
+                    xhtml_out.append(f'<ol start="{start_num}">')
+                else:
+                    xhtml_out.append("<ol>")
                 in_ol = True
-            item_text = format_inlines(m_ol.group(1))
+            item_text = format_inlines(m_ol.group(2))
             xhtml_out.append(f"<li>{item_text}</li>")
             idx += 1
             continue
@@ -503,25 +554,33 @@ def markdown_to_xhtml(md_text: str) -> str:
         # Blank line = paragraph break
         if not stripped:
             flush_p()
-            if in_ol or in_ul:
-                next_non_empty = None
-                for lookahead in lines[idx + 1:]:
-                    ls = lookahead.strip()
-                    if ls:
-                        next_non_empty = ls
-                        break
-                if in_ol and next_non_empty and re.match(r"^\d+\.\s+", next_non_empty):
-                    idx += 1
-                    continue
-                elif in_ul and next_non_empty and re.match(r"^[-*]\s+", next_non_empty):
-                    idx += 1
-                    continue
-                else:
-                    flush_list()
+            if in_ol and not has_upcoming_list_item(idx, r"^\d+\.\s+"):
+                flush_list()
+            elif in_ul and not has_upcoming_list_item(idx, r"^[-*]\s+"):
+                flush_list()
             idx += 1
             continue
 
-        # Regular text
+        # If inside an active list and another list item is upcoming, nest text inside current <li>
+        if in_ol and has_upcoming_list_item(idx, r"^\d+\.\s+"):
+            if xhtml_out and xhtml_out[-1].endswith("</li>"):
+                xhtml_out[-1] = xhtml_out[-1][:-5] + f"<p>{format_inlines(stripped)}</p></li>"
+            else:
+                p_buffer.append(stripped)
+            idx += 1
+            continue
+
+        if in_ul and has_upcoming_list_item(idx, r"^[-*]\s+"):
+            if xhtml_out and xhtml_out[-1].endswith("</li>"):
+                xhtml_out[-1] = xhtml_out[-1][:-5] + f"<p>{format_inlines(stripped)}</p></li>"
+            else:
+                p_buffer.append(stripped)
+            idx += 1
+            continue
+
+        # Regular text outside connected list items
+        if in_ol or in_ul:
+            flush_list()
         p_buffer.append(stripped)
         idx += 1
 
