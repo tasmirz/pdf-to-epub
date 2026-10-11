@@ -34,6 +34,7 @@ A vision-first, parallel multi-agent skill for converting complex PDF documents 
 ## Bundled Helper Utilities
 
 The skill bundles standalone Python scripts located at `~/.gemini/config/skills/pdf-to-epub/scripts/`:
+- `html_to_epub.py`: Direct HTML / XHTML / Web Page to EPUB3 converter (Native MathML, asset bundling, article cleaning).
 - `tex_to_epub.py`: Direct LaTeX / TeX to EPUB3 converter (Native W3C MathML equations, PDF figure transcoding).
 - `docx_to_epub.py`: Direct DOCX to EPUB3 converter (Zero intermediate PDF, automatic font bloat sanitization).
 - `docx_to_pdf.py`: Direct DOCX / Word to PDF converter with sandboxed profile isolation.
@@ -90,13 +91,37 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/tex_to_epub.py papers_folder
 - **Auto-Preamble Injection**: Automatically detects raw TeX snippets or lecture notes missing `\documentclass` and wraps them in an `amsmath`, `amssymb`, `graphicx`, `hyperref` preamble.
 - **Dual Engine Architecture**: Defaults to `tex4ebook` (TeX Live standard), falling back to `make4ht` + `epub_packager.py`.
 
-### 3. `docx_to_pdf.py` (Direct Word to PDF)
+### 3. `html_to_epub.py` (Direct HTML / XHTML / Web Page to EPUB3)
+```bash
+# Convert a single HTML file to clean EPUB3
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/html_to_epub.py article.html -o article.epub
+
+# Convert with article cleaning (removes ad scripts, tracking pixels, navigation chrome)
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/html_to_epub.py web_page.html -o article.epub --clean-article
+
+# Convert and merge multi-file documentation / book chapters into one EPUB
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/html_to_epub.py chapter1.html chapter2.html -o book.epub --title "My Book"
+
+# Convert an online web article directly from URL
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/html_to_epub.py https://example.com/article -o web_article.epub
+
+# Via unified CLI
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/cli.py html2epub article.html -o article.epub
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/cli.py convert article.html -o article.epub
+```
+- **Universal Input Ingestion**: Converts standalone HTML/XHTML files, web articles from HTTP/HTTPS URLs, multi-page HTML documentation, or entire directories of chapter files.
+- **Intelligent Asset Harvesting**: Inlines and decodes base64 data URIs into standalone PNG/JPEG assets, resolves and bundles local relative images/SVGs, and downloads remote images.
+- **Article Cleaning (`--clean-article`)**: Purges web ads, tracking scripts, iframes, navigation menus, and cookie notices while preserving semantic body text, code blocks, tables, blockquotes, and figures.
+- **Native W3C MathML & Code Blocks**: Preserves `<math>` formulas and formats `<pre><code>` blocks with clean monospace typography.
+- **Multi-File Chapter Merging**: Merges an ordered sequence of HTML files into a structured multi-chapter book with an auto-generated Table of Contents (`nav.xhtml` & `toc.ncx`).
+
+### 4. `docx_to_pdf.py` (Direct Word to PDF)
 ```bash
 # Convert DOCX to high-fidelity vector PDF
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/docx_to_pdf.py document.docx -o document.pdf --preview
 ```
 
-### 4. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown with DLA)
+### 5. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown with DLA)
 ```bash
 # Convert PPTX or legacy PPT directly into reflowable EPUB3 using DLA & Heading Stack
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.pptx \

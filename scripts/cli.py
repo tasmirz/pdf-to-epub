@@ -168,11 +168,23 @@ def main():
     p_t2e.add_argument("--title", help="Document title metadata")
     p_t2e.add_argument("--author", help="Author name metadata")
 
+    # html2epub (Direct HTML / XHTML / Web Page -> EPUB3 with Native MathML & Asset Bundling)
+    p_h2e = subparsers.add_parser("html2epub", help="Directly convert HTML / XHTML documents or URLs to EPUB3")
+    p_h2e.add_argument("inputs", nargs="+", help="Input HTML file(s), folder, glob, or URL(s)")
+    p_h2e.add_argument("-o", "--output", help="Exact output EPUB file")
+    p_h2e.add_argument("-d", "--outdir", help="Output directory for generated EPUBs")
+    p_h2e.add_argument("--flow", choices=["single", "split", "auto"], default="single", help="EPUB XHTML flow architecture (default: single)")
+    p_h2e.add_argument("--clean-article", action="store_true", help="Clean ads, scripts, navigation chrome for article readability")
+    p_h2e.add_argument("--title", help="Document title metadata")
+    p_h2e.add_argument("--author", help="Author name metadata")
+    p_h2e.add_argument("--lang", default="en", help="Language code (default: en)")
+
     # convert (universal)
-    p_conv = subparsers.add_parser("convert", help="Universal converter for DOCX, PDF, PPTX, PPT, and TeX/LaTeX to EPUB3 or PDF")
-    p_conv.add_argument("input", help="Path to input document (.docx, .pdf, .pptx, .ppt, or .tex)")
+    p_conv = subparsers.add_parser("convert", help="Universal converter for HTML, DOCX, PDF, PPTX, PPT, and TeX/LaTeX to EPUB3 or PDF")
+    p_conv.add_argument("input", help="Path to input document (.html, .docx, .pdf, .pptx, .ppt, or .tex) or URL")
     p_conv.add_argument("-o", "--output", required=True, help="Output .epub or .pdf file")
-    p_conv.add_argument("--flow", choices=["single", "split"], default="single", help="EPUB flow architecture for DOCX/TeX conversion")
+    p_conv.add_argument("--flow", choices=["single", "split"], default="single", help="EPUB flow architecture for DOCX/TeX/HTML conversion")
+    p_conv.add_argument("--clean-article", action="store_true", help="Clean ads, scripts, navigation chrome for HTML article readability")
     p_conv.add_argument("--title", help="Document title")
     p_conv.add_argument("--author", default="Unknown Author", help="Author name")
     p_conv.add_argument("--lang", default="en", help="Language code")
@@ -344,12 +356,96 @@ def main():
                 print(f"[FAIL] {tex_file.name}: {res['error']}", file=sys.stderr)
         if success_cnt == 0:
             sys.exit(1)
+    elif args.subcommand == "html2epub":
+        from html_to_epub import convert_html_to_epub, convert_multi_html_to_epub, SUPPORTED_HTML_EXTENSIONS
+        import glob
+        expanded = []
+        for item in args.inputs:
+            if item.startswith("http://") or item.startswith("https://"):
+                expanded.append(item)
+                continue
+            p = Path(item)
+            if p.is_dir():
+                for ext in SUPPORTED_HTML_EXTENSIONS:
+                    expanded.extend(sorted(list(p.glob(f"*{ext}"))))
+            elif any(c in item for c in ["*", "?", "["]):
+                expanded.extend([Path(m) for m in sorted(glob.glob(item))])
+            else:
+                expanded.append(p)
+        if not expanded:
+            print("[ERROR] No input HTML files or URLs found.", file=sys.stderr)
+            sys.exit(1)
+
+        # Merge multiple files into one book if -o is specified
+        if len(expanded) > 1 and args.output:
+            res = convert_multi_html_to_epub(
+                expanded,
+                Path(args.output),
+                title=args.title,
+                author=args.author,
+                lang=args.lang,
+                clean_article=args.clean_article
+            )
+            if res["success"]:
+                size_kb = res["file_size"] / 1024
+                print(f"[OK] Merged {len(expanded)} HTML files -> {res['output_path']} [{size_kb:.1f} KB, {res['elapsed_sec']}s]")
+                sys.exit(0)
+            else:
+                print(f"[FAIL] Merge failed: {res['error']}", file=sys.stderr)
+                sys.exit(1)
+
+        success_cnt = 0
+        for item in expanded:
+            out_epub = args.output if (len(expanded) == 1 and args.output) else None
+            res = convert_html_to_epub(
+                item,
+                output_epub=out_epub,
+                outdir=args.outdir,
+                title=args.title,
+                author=args.author,
+                lang=args.lang,
+                flow_mode=args.flow,
+                clean_article=args.clean_article
+            )
+            if res["success"]:
+                success_cnt += 1
+                size_kb = res["file_size"] / 1024
+                name = item if isinstance(item, str) else item.name
+                print(f"[OK] {name} -> {res['output_path']} [{size_kb:.1f} KB, {res['elapsed_sec']}s]")
+            else:
+                name = item if isinstance(item, str) else item.name
+                print(f"[FAIL] {name}: {res['error']}", file=sys.stderr)
+        if success_cnt == 0:
+            sys.exit(1)
     elif args.subcommand == "convert":
-        in_p = Path(args.input).resolve()
+        in_str = str(args.input)
+        is_url = in_str.startswith("http://") or in_str.startswith("https://")
+        in_p = Path(in_str).resolve() if not is_url else Path(in_str)
         out_p = Path(args.output).resolve()
         use_stack = not getattr(args, "no_heading_stack", False)
         filter_rep = not getattr(args, "no_filter_repetitive", False)
-        if in_p.suffix.lower() in [".tex", ".ltx"]:
+        clean_art = getattr(args, "clean_article", False)
+
+        if is_url or (not is_url and in_p.suffix.lower() in [".html", ".htm", ".xhtml", ".shtml", ".mhtml"]):
+            # Direct HTML / Web page to EPUB3
+            from html_to_epub import convert_html_to_epub
+            res = convert_html_to_epub(
+                in_str if is_url else in_p,
+                output_epub=out_p,
+                flow_mode=getattr(args, "flow", "single"),
+                clean_article=clean_art,
+                title=args.title,
+                author=args.author,
+                lang=args.lang
+            )
+            if res["success"]:
+                size_kb = res["file_size"] / 1024
+                target_name = in_str if is_url else in_p.name
+                print(f"[OK] Converted {target_name} directly to EPUB3 (native MathML & assets): {out_p} [{size_kb:.1f} KB, {res['elapsed_sec']}s]")
+            else:
+                print(f"[ERROR] Direct HTML to EPUB failed: {res['error']}", file=sys.stderr)
+                sys.exit(1)
+        elif in_p.suffix.lower() in [".tex", ".ltx"]:
             # Direct TeX / LaTeX to EPUB3 (Native MathML)
             from tex_to_epub import convert_tex_to_epub
             res = convert_tex_to_epub(
