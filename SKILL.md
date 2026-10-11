@@ -34,12 +34,14 @@ A vision-first, parallel multi-agent skill for converting complex PDF documents 
 ## Bundled Helper Utilities
 
 The skill bundles standalone Python scripts located at `~/.gemini/config/skills/pdf-to-epub/scripts/`:
+- `tex_to_epub.py`: Direct LaTeX / TeX to EPUB3 converter (Native W3C MathML equations, PDF figure transcoding).
 - `docx_to_epub.py`: Direct DOCX to EPUB3 converter (Zero intermediate PDF, automatic font bloat sanitization).
 - `docx_to_pdf.py`: Direct DOCX / Word to PDF converter with sandboxed profile isolation.
 - `pptx_parser.py`: Direct PowerPoint (PPTX / PPT) to Markdown & EPUB3 extraction engine with DLA.
 - `collage_maker.py`: Adaptive visual grid collage generator and region cropper (supports PDF, PPTX, PPT with 3x2, 2x2, 3x3).
 - `epub_packager.py`: Self-contained EPUB3 compiler with native W3C MathML and single/multi-flow layout.
 - `verify_fidelity.py`: Line-by-line quality and fidelity verifier with sentence alignment coverage.
+- `compare_with_gold.py`: Verification tool comparing generated EPUBs against reference gold standards.
 - `cli.py`: Unified command-line interface (`pdf-to-epub`).
 
 ### 1. `docx_to_epub.py` (Direct Word to EPUB3 — No PDF In Between)
@@ -67,13 +69,34 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/compare_with_gold.py
 - **Automatic Font Bloat Sanitization**: Strips 40MB+ of embedded system fonts (`OEBPS/fonts/*.otf`) that LibreOffice injects by default, shrinking bloated 32MB EPUBs down to ~500KB (identical to Google Docs export).
 - **Dual Engine Architecture**: Defaults to LibreOffice headless with auto-sanitization and semantic enrichment, falling back to pure-Python semantic parsing (`mammoth` + `epub_packager.py`).
 
-### 2. `docx_to_pdf.py` (Direct Word to PDF)
+### 2. `tex_to_epub.py` (Direct LaTeX / TeX to EPUB3 with Native MathML)
+```bash
+# Convert TeX document directly to EPUB3 with native W3C MathML equations
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/tex_to_epub.py paper.tex -o paper.epub
+
+# Convert with single-flow continuous document layout
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/tex_to_epub.py paper.tex -o paper.epub --flow single
+
+# Via unified CLI
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/cli.py tex2epub paper.tex -o paper.epub
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/cli.py convert paper.tex -o paper.epub
+
+# Batch convert a folder of .tex files directly to EPUB3
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/tex_to_epub.py papers_folder/ --outdir epubs/
+```
+- **Native W3C MathML**: Automatically compiles inline math (`$...$`), display equations (`$$...$$`, `\begin{equation}`), matrices, and Greek notation into standard, reflowable MathML (`<math>`) tags.
+- **Sandboxed Compilation**: Build directories (`-B <dir>`, `-d <dir>`) are isolated in temporary workspaces; auxiliary files (`.aux`, `.log`, `.idv`, `.4ct`) never pollute the source directory.
+- **PDF Figure Auto-Transcoding**: Detects `\includegraphics{...pdf}` and automatically converts vector PDF graphics into high-resolution PNGs with `pdftoppm` for strict EPUB3 compliance.
+- **Auto-Preamble Injection**: Automatically detects raw TeX snippets or lecture notes missing `\documentclass` and wraps them in an `amsmath`, `amssymb`, `graphicx`, `hyperref` preamble.
+- **Dual Engine Architecture**: Defaults to `tex4ebook` (TeX Live standard), falling back to `make4ht` + `epub_packager.py`.
+
+### 3. `docx_to_pdf.py` (Direct Word to PDF)
 ```bash
 # Convert DOCX to high-fidelity vector PDF
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/docx_to_pdf.py document.docx -o document.pdf --preview
 ```
 
-### 3. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown with DLA)
+### 4. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown with DLA)
 ```bash
 # Convert PPTX or legacy PPT directly into reflowable EPUB3 using DLA & Heading Stack
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.pptx \
@@ -93,7 +116,7 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.
 - **Heading Stack State Machine**: Thematically clusters continuation slides into coherent textbook chapters (H1 -> H2 -> continuations), preventing artificial 1-slide page breaks and tiny 2-sentence chapters.
 - **Multimodal Vision Routing**: Routes complex mathematical formulas and text graphics to Vision LLMs for LaTeX MathML transcription, while embedding diagrams/illustrations as-is. Replaces noisy pytesseract OCR.
 
-### 2. `collage_maker.py`
+### 5. `collage_maker.py`
 ```bash
 # 1. Get total page/slide count
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py count document.pdf
@@ -107,7 +130,7 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py crop docume
     --page 3 --coords "150,200,450,850" -o figures/fig_p3_1.png --dpi 300
 ```
 
-### 3. `epub_packager.py`
+### 6. `epub_packager.py`
 ```bash
 # Compile Markdown + cropped figures into valid EPUB3
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/epub_packager.py document.md \
@@ -119,7 +142,7 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/epub_packager.py document.md
     --split-mode auto
 ```
 
-### 4. `verify_fidelity.py` (Line-by-Line Quality & Fidelity Verifier)
+### 7. `verify_fidelity.py` (Line-by-Line Quality & Fidelity Verifier)
 ```bash
 # Run line-by-line verification after each build (supports PDF, PPTX, and PPT)
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/verify_fidelity.py \

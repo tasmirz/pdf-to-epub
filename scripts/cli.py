@@ -157,11 +157,22 @@ def main():
     p_d2e.add_argument("--title", help="Document title metadata")
     p_d2e.add_argument("--author", help="Author name metadata")
 
+    # tex2epub (Direct TeX / LaTeX -> EPUB3 with Native MathML)
+    p_t2e = subparsers.add_parser("tex2epub", help="Directly convert TeX / LaTeX documents (.tex) to EPUB3 (Native MathML)")
+    p_t2e.add_argument("inputs", nargs="+", help="Input .tex file(s), folder, or glob pattern")
+    p_t2e.add_argument("-o", "--output", help="Exact output EPUB file (for single document input)")
+    p_t2e.add_argument("-d", "--outdir", help="Output directory for generated EPUBs")
+    p_t2e.add_argument("--flow", choices=["split", "single"], default="split", help="EPUB XHTML flow architecture (default: split)")
+    p_t2e.add_argument("--no-mathml", action="store_true", help="Disable W3C MathML equations")
+    p_t2e.add_argument("--engine", choices=["auto", "tex4ebook", "make4ht"], default="auto", help="Conversion engine")
+    p_t2e.add_argument("--title", help="Document title metadata")
+    p_t2e.add_argument("--author", help="Author name metadata")
+
     # convert (universal)
-    p_conv = subparsers.add_parser("convert", help="Universal converter for DOCX, PDF, PPTX, and PPT to EPUB3 or PDF")
-    p_conv.add_argument("input", help="Path to input document (.docx, .pdf, .pptx, or .ppt)")
+    p_conv = subparsers.add_parser("convert", help="Universal converter for DOCX, PDF, PPTX, PPT, and TeX/LaTeX to EPUB3 or PDF")
+    p_conv.add_argument("input", help="Path to input document (.docx, .pdf, .pptx, .ppt, or .tex)")
     p_conv.add_argument("-o", "--output", required=True, help="Output .epub or .pdf file")
-    p_conv.add_argument("--flow", choices=["single", "split"], default="single", help="EPUB flow architecture for DOCX conversion")
+    p_conv.add_argument("--flow", choices=["single", "split"], default="single", help="EPUB flow architecture for DOCX/TeX conversion")
     p_conv.add_argument("--title", help="Document title")
     p_conv.add_argument("--author", default="Unknown Author", help="Author name")
     p_conv.add_argument("--lang", default="en", help="Language code")
@@ -295,12 +306,66 @@ def main():
                 print(f"[FAIL] {doc_file.name}: {res['error']}", file=sys.stderr)
         if success_cnt == 0:
             sys.exit(1)
+    elif args.subcommand == "tex2epub":
+        from tex_to_epub import convert_tex_to_epub, SUPPORTED_TEX_EXTENSIONS
+        import glob
+        expanded = []
+        for item in args.inputs:
+            p = Path(item)
+            if p.is_dir():
+                for ext in SUPPORTED_TEX_EXTENSIONS:
+                    expanded.extend(list(p.glob(f"*{ext}")))
+            elif any(c in item for c in ["*", "?", "["]):
+                expanded.extend([Path(m) for m in glob.glob(item)])
+            else:
+                expanded.append(p)
+        if not expanded:
+            print("[ERROR] No input .tex files found.", file=sys.stderr)
+            sys.exit(1)
+        mathml = not getattr(args, "no_mathml", False)
+        success_cnt = 0
+        for tex_file in expanded:
+            out_epub = args.output if (len(expanded) == 1 and args.output) else None
+            res = convert_tex_to_epub(
+                tex_file,
+                output_epub=out_epub,
+                outdir=args.outdir,
+                mathml=mathml,
+                flow_mode=getattr(args, "flow", "split"),
+                title=args.title,
+                author=args.author,
+                engine=args.engine
+            )
+            if res["success"]:
+                success_cnt += 1
+                size_kb = res["file_size"] / 1024
+                print(f"[OK] {tex_file.name} -> {res['output_path']} [{size_kb:.1f} KB, {res['elapsed_sec']}s, engine={res['engine']}]")
+            else:
+                print(f"[FAIL] {tex_file.name}: {res['error']}", file=sys.stderr)
+        if success_cnt == 0:
+            sys.exit(1)
     elif args.subcommand == "convert":
         in_p = Path(args.input).resolve()
         out_p = Path(args.output).resolve()
         use_stack = not getattr(args, "no_heading_stack", False)
         filter_rep = not getattr(args, "no_filter_repetitive", False)
-        if in_p.suffix.lower() in [".docx", ".doc", ".dotx", ".odt", ".rtf"]:
+        if in_p.suffix.lower() in [".tex", ".ltx"]:
+            # Direct TeX / LaTeX to EPUB3 (Native MathML)
+            from tex_to_epub import convert_tex_to_epub
+            res = convert_tex_to_epub(
+                str(in_p),
+                output_epub=str(out_p),
+                flow_mode=getattr(args, "flow", "split"),
+                title=args.title,
+                author=args.author
+            )
+            if res["success"]:
+                size_kb = res["file_size"] / 1024
+                print(f"[OK] Converted {in_p.name} directly to EPUB3 (native MathML): {out_p} [{size_kb:.1f} KB, {res['elapsed_sec']}s, engine={res['engine']}]")
+            else:
+                print(f"[ERROR] Direct TeX to EPUB failed: {res['error']}", file=sys.stderr)
+                sys.exit(1)
+        elif in_p.suffix.lower() in [".docx", ".doc", ".dotx", ".odt", ".rtf"]:
             if out_p.suffix.lower() == ".pdf":
                 from docx_to_pdf import convert_docx_to_pdf
                 res = convert_docx_to_pdf(str(in_p), output_pdf=str(out_p))
