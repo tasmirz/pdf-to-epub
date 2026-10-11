@@ -31,20 +31,29 @@ A vision-first, parallel multi-agent skill for converting complex PDF documents 
 
 ---
 
-## Bundled Helper Utilities
+## Bundled Resources & Directory Structure
 
-The skill bundles standalone Python scripts located at `~/.gemini/config/skills/pdf-to-epub/scripts/`:
-- `novel_crawler.py`: Web novel crawler, multi-tier ad/watermark cleaner, DevTools console script generator, and EPUB3 packager.
-- `html_to_epub.py`: Direct HTML / XHTML / Web Page to EPUB3 converter (Native MathML, asset bundling, article cleaning).
-- `tex_to_epub.py`: Direct LaTeX / TeX to EPUB3 converter (Native W3C MathML equations, PDF figure transcoding).
-- `docx_to_epub.py`: Direct DOCX to EPUB3 converter (Zero intermediate PDF, automatic font bloat sanitization).
-- `docx_to_pdf.py`: Direct DOCX / Word to PDF converter with sandboxed profile isolation.
-- `pptx_parser.py`: Direct PowerPoint (PPTX / PPT) to Markdown & EPUB3 extraction engine with DLA.
-- `collage_maker.py`: Adaptive visual grid collage generator and region cropper (supports PDF, PPTX, PPT with 3x2, 2x2, 3x3).
-- `epub_packager.py`: Self-contained EPUB3 compiler with native W3C MathML and single/multi-flow layout.
-- `verify_fidelity.py`: Line-by-line quality and fidelity verifier with sentence alignment coverage.
-- `compare_with_gold.py`: Verification tool comparing generated EPUBs against reference gold standards.
-- `cli.py`: Unified command-line interface (`pdf-to-epub`).
+The skill follows standard progressive disclosure across three layers:
+- `scripts/`: Executable code for deterministic & repetitive conversion tasks:
+  - `novel_crawler.py`: Web novel crawler, multi-tier ad/watermark cleaner, DevTools console script generator, and EPUB3 packager.
+  - `html_to_epub.py`: Direct HTML / XHTML / Web Page to EPUB3 converter (Native MathML, asset bundling, article cleaning).
+  - `tex_to_epub.py`: Direct LaTeX / TeX to EPUB3 converter (Native W3C MathML equations, PDF figure transcoding).
+  - `docx_to_epub.py`: Direct DOCX to EPUB3 converter (Zero intermediate PDF, automatic font bloat sanitization).
+  - `docx_to_pdf.py`: Direct DOCX / Word to PDF converter with sandboxed profile isolation.
+  - `pptx_parser.py`: Direct PowerPoint (PPTX / PPT) to Markdown & EPUB3 extraction engine with DLA.
+  - `collage_maker.py`: Adaptive visual grid collage generator and region cropper (supports PDF, PPTX, PPT with 3x2, 2x2, 3x3).
+  - `epub_packager.py`: Self-contained EPUB3 compiler with native W3C MathML and single/multi-flow layout.
+  - `verify_fidelity.py`: Line-by-line quality and fidelity verifier with sentence alignment coverage.
+  - `compare_with_gold.py`: Verification tool comparing generated EPUBs against reference gold standards.
+  - `cli.py`: Unified command-line interface (`pdf-to-epub`).
+- `references/`: Detailed specifications loaded into agent context on demand:
+  - `references/crawler_rules.md`: Algorithmic DOM density scoring, recipe schemas, and DevTools script instructions.
+  - `references/mathml_standards.md`: W3C MathML namespace, OPF properties, and LaTeX translation rules.
+  - `references/dla_architecture.md`: Visual collage grid sampling (3x3/2x2/3x2), heading stack state machines, and margin purging.
+- `assets/`: Templates and starter configurations:
+  - `assets/styles/epub_default.css`: Clean, dark-mode-ready EPUB3 typography stylesheet.
+  - `assets/styles/mathml.css`: Mathematical formula layout styles.
+  - `assets/site_recipes/template_recipe.json`: Starter recipe for web novel domains.
 
 ### 1. `docx_to_epub.py` (Direct Word to EPUB3 — No PDF In Between)
 ```bash

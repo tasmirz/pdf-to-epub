@@ -1,0 +1,30 @@
+/* W3C MathML Typography & Formula Layout */
+@charset "utf-8";
+
+math {
+    font-family: "STIX Two Math", "Cambria Math", "Latin Modern Math", serif;
+    font-style: normal;
+}
+
+math[display="block"], .display-equation {
+    display: block;
+    margin: 1.2em auto;
+    text-align: center;
+    overflow-x: auto;
+    padding: 0.5em 0;
+}
+
+math[display="inline"] {
+    display: inline;
+    vertical-align: baseline;
+}
+
+mrow {
+    display: inline-block;
+}
+
+/* Fallback for readers with partial MathML fonts */
+mi { font-style: italic; }
+mo { padding: 0 0.15em; }
+mfrac { padding: 0 0.1em; }
+mtable { margin: 0 auto; border-spacing: 0.4em; }

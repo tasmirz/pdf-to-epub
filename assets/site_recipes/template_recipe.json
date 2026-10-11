@@ -1,0 +1,31 @@
+{
+  "domain": "example.com",
+  "content_selector": "#chapter-content, .entry-content, article",
+  "title_selector": "h1.chapter-title, h1",
+  "next_selector": "a.next-chapter, a:contains('Next')",
+  "toc_selector": ".chapter-list a",
+  "ad_selectors": [
+    ".ad",
+    ".ads",
+    ".advert",
+    ".ad-box",
+    ".banner-ad",
+    ".adsbygoogle",
+    "ins.adsbygoogle",
+    ".sponsor",
+    ".comments",
+    "iframe",
+    "script",
+    "style"
+  ],
+  "watermark_patterns": [
+    "(?i)(visit|read at|novel updated on|translated by|patreon)\\s+.*"
+  ],
+  "url_whitelist_regex": "^https://example\\.com/novel/.*",
+  "delay": 1.0,
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  }
+}

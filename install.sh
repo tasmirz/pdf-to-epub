@@ -62,9 +62,11 @@ echo "[4/4] Checking Antigravity environment..."
 SKILL_TARGET="$HOME/.gemini/config/skills/pdf-to-epub"
 if [ -d "$HOME/.gemini" ]; then
     echo "Antigravity installation detected. Installing global skill..."
-    mkdir -p "$SKILL_TARGET/scripts"
+    mkdir -p "$SKILL_TARGET/scripts" "$SKILL_TARGET/references" "$SKILL_TARGET/assets"
     cp "$SCRIPT_DIR/SKILL.md" "$SKILL_TARGET/SKILL.md"
     cp "$SCRIPT_DIR/scripts/"*.py "$SKILL_TARGET/scripts/"
+    cp -r "$SCRIPT_DIR/references/"* "$SKILL_TARGET/references/" 2>/dev/null || true
+    cp -r "$SCRIPT_DIR/assets/"* "$SKILL_TARGET/assets/" 2>/dev/null || true
     chmod +x "$SKILL_TARGET/scripts/"*.py
     echo "  -> Skill installed successfully to $SKILL_TARGET"
 else
