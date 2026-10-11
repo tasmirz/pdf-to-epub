@@ -5,19 +5,20 @@
 [![EPUB3 Compliant](https://img.shields.io/badge/EPUB-3.0-green.svg)](https://www.w3.org/publishing/epub3/)
 [![W3C MathML](https://img.shields.io/badge/MathML-Native-purple.svg)](https://www.w3.org/Math/)
 
-A universal, high-fidelity conversion engine and agent skill that transforms **PDFs, Word documents (DOCX), LaTeX (TeX), PowerPoint presentations (PPTX/PPT), Web Pages (HTML), and Web Novels** into clean, publication-grade **EPUB3** ebooks and **Markdown**.
+A universal, high-fidelity document conversion engine and agent skill that transforms **Web Novels, Word documents (DOCX), LaTeX (TeX), PowerPoint presentations (PPTX/PPT), HTML/Web pages, and complex PDFs** into publication-grade **EPUB3** ebooks and **Markdown**.
 
 ---
 
-## Table of Contents
+## Quick Navigation
 
 - [Supported Input Formats](#supported-input-formats)
-- [Installation Guide](#installation-guide)
-  - [One-Command Quick Install](#1-one-command-quick-install)
-  - [Manual System Prerequisites](#2-manual-system-prerequisites)
-  - [Python Virtual Environment](#3-python-environment)
+- [Installation Guide (Human & LLM Ready)](#installation-guide-human--llm-ready)
+  - [1-Command Universal Install](#1-one-command-quick-install)
+  - [LLM Environment Self-Check Protocol](#2-llm-environment-self-check-protocol)
+  - [System Package Breakdown](#3-system-prerequisites-by-os)
+  - [Python Virtual Environment](#4-python-environment)
 - [Command Cheatsheet by Format](#command-cheatsheet-by-format)
-  - [Web Novels & Serialized Fiction](#1-web-novels--serialized-fiction)
+  - [Web Novels & Serials](#1-web-novels--serialized-fiction)
   - [Word Documents (DOCX / ODT)](#2-word-documents-docx--odt)
   - [LaTeX / TeX Documents](#3-latex--tex-documents)
   - [PowerPoint Presentations (PPTX / PPT)](#4-powerpoint-presentations-pptx--ppt)
@@ -25,12 +26,8 @@ A universal, high-fidelity conversion engine and agent skill that transforms **P
   - [Complex PDFs (Vision-First Probing)](#6-complex-pdfs-vision-first-probing)
   - [Universal Auto-Detect Converter](#7-universal-auto-detect-converter)
 - [DevTools Browser Exporter (Bypass Cloudflare / Paywalls)](#devtools-browser-exporter-bypass-cloudflare--paywalls)
-- [Guidelines for LLMs & Autonomous Agents](#guidelines-for-llms--autonomous-agents)
-  - [Agent Decision Matrix](#agent-decision-matrix)
-  - [Subagent Block Partitioning](#subagent-block-partitioning)
-  - [Math & Equation Rule](#math--equation-rule)
-  - [Ad Stripping & Boundary Policy](#ad-stripping--boundary-policy)
-- [Verification & Quality Assurance](#verification--quality-assurance)
+- [Full LLM Guidelines: Web Novel Crawler Operational Manual](#full-llm-guidelines-web-novel-crawler-operational-manual)
+- [General LLM & Autonomous Agent Principles](#general-llm--autonomous-agent-principles)
 - [Repository Structure](#repository-structure)
 - [License](#license)
 
@@ -38,49 +35,85 @@ A universal, high-fidelity conversion engine and agent skill that transforms **P
 
 ## Supported Input Formats
 
-| Input Format | Engine | Key Highlights | Target Outputs |
+| Input Format | Primary Engine | Key Highlights | Target Outputs |
 |---|---|---|---|
-| **Web Novels** (`http://`, `https://`) | `novel_crawler.py` | No-LLM DOM density scoring, multi-tier ad stripping, polite jitter, resumable `.novel_cache/` | `.epub`, `.html` |
-| **Word DOCX** (`.docx`, `.odt`, `.rtf`) | `docx_to_epub.py` | Direct conversion (zero intermediate PDF), system font bloat purge, Google Docs gold layout | `.epub`, `.pdf` |
+| **Web Novels** (`http://`, `https://`) | `novel_crawler.py` | No-LLM DOM density scoring, multi-tier ad stripping, polite delay, DevTools console script, `.novel_cache/` | `.epub`, `.html` |
+| **Word DOCX** (`.docx`, `.odt`, `.rtf`) | `docx_to_epub.py` | Direct conversion (zero intermediate PDF), system font bloat purge, Google Docs gold layout match | `.epub`, `.pdf` |
 | **LaTeX / TeX** (`.tex`) | `tex_to_epub.py` | Native W3C MathML equations, vector figure transcoding, auto-preamble injection | `.epub` |
 | **PowerPoint** (`.pptx`, `.ppt`) | `pptx_parser.py` | Document Layout Analysis (DLA), heading stack state machine, margin footer purging | `.epub`, `.md` |
-| **HTML & Web** (`.html`, `.xhtml`, URL) | `html_to_epub.py` | Asset harvesting, base64 PNG decoding, MathML preservation, article ad cleaner | `.epub` |
+| **HTML & Web** (`.html`, `.xhtml`, URL) | `html_to_epub.py` | Asset harvesting, base64 PNG decoding, MathML preservation, article ad cleaner (`--clean-article`) | `.epub` |
 | **Complex PDF** (`.pdf`) | `collage_maker.py` + Workers | Adaptive visual collage probing (3x3 / 2x2 / 1x1), parallel subagent dispatch, bbox cropper | `.epub`, `.md` |
-| **Console ZIP** (`.zip`) | `novel_crawler.py import-zip` | Turn browser DevTools console chapter exports into unified EPUB3 | `.epub` |
+| **Console ZIP** (`.zip`) | `novel_crawler.py import-zip` | Turn browser DevTools console chapter exports directly into unified EPUB3 | `.epub` |
 
 ---
 
-## Installation Guide
+## Installation Guide (Human & LLM Ready)
 
 ### 1. One-Command Quick Install
+Run this single command on any Linux or macOS system:
 ```bash
 git clone https://github.com/tasmirz/pdf2epub.git
 cd pdf2epub
-chmod +x install.sh
-./install.sh
+chmod +x install.sh && ./install.sh
 ```
 
-The installer verifies system packages, installs Python dependencies, links `pdf-to-epub` into `~/.local/bin`, and synchronizes the global Antigravity skill directory.
+**What the installer does automatically:**
+1. Checks and installs `poppler-utils` (`pdftoppm`) via your system package manager.
+2. Installs required Python packages (`Pillow`, `PyMuPDF`, `latex2mathml`, `python-pptx`, `beautifulsoup4`).
+3. Links the unified executable `pdf-to-epub` into `~/.local/bin/`.
+4. If Antigravity is detected, synchronizes the skill into `~/.gemini/config/skills/pdf-to-epub/`.
 
 ---
 
-### 2. Manual System Prerequisites
+### 2. LLM Environment Self-Check Protocol
+When an autonomous AI agent or LLM begins work in this repository, run this fast 3-second self-check snippet to determine environment readiness:
 
-Depending on the formats you intend to convert, install the relevant system utilities:
-
-#### Linux (Debian / Ubuntu / Pop!_OS)
 ```bash
-# Core PDF rendering & font support:
+python3 -c "
+import sys, shutil
+checks = {
+    'Python 3.10+': sys.version_info >= (3, 10),
+    'bs4': shutil.which('python3') and __import__('importlib.util').util.find_spec('bs4') is not None,
+    'pymupdf': __import__('importlib.util').util.find_spec('pymupdf') is not None or __import__('importlib.util').util.find_spec('fitz') is not None,
+    'pdftoppm': shutil.which('pdftoppm') is not None,
+    'libreoffice': shutil.which('soffice') is not None,
+    'tex4ebook': shutil.which('tex4ebook') is not None,
+    'playwright': __import__('importlib.util').util.find_spec('playwright') is not None
+}
+print('=== Toolchain Readiness Audit ===')
+for name, ok in checks.items():
+    print(f'[{chr(10003) if ok else \" \"}] {name:15}: {\"READY\" if ok else \"MISSING / OPTIONAL\"}')
+"
+```
+
+If dependencies are missing:
+```bash
+# Core Python requirements:
+pip install -r requirements.txt --break-system-packages
+
+# Optional Playwright browser (for heavy JS SPAs):
+pip install playwright && playwright install chromium
+```
+
+---
+
+### 3. System Prerequisites by OS
+
+Depending on which formats you plan to convert, install the matching system packages:
+
+#### Debian / Ubuntu / Pop!_OS
+```bash
+# Core PDF rendering & OCR:
 sudo apt-get update && sudo apt-get install -y poppler-utils tesseract-ocr
 
-# Optional: For DOCX direct rendering to PDF/EPUB:
+# For DOCX direct rendering:
 sudo apt-get install -y libreoffice-core
 
-# Optional: For LaTeX native compilation:
+# For LaTeX native MathML compilation:
 sudo apt-get install -y texlive-extra-utils tex4ebook make4ht
 ```
 
-#### Linux (Arch / Manjaro)
+#### Arch Linux / Manjaro
 ```bash
 sudo pacman -S --needed poppler tesseract libreoffice-fresh texlive-bin
 ```
@@ -92,41 +125,32 @@ brew install poppler tesseract libreoffice
 
 ---
 
-### 3. Python Environment
+### 4. Python Environment
 ```bash
-# Recommended: Create a virtual environment
+# Setup virtual environment (recommended):
 python3 -m venv .venv
 source .venv/bin/activate
-
-# Install requirements
 pip install -r requirements.txt
-```
-
-*(Optional: For headless JavaScript browser rendering on SPA novel sites)*:
-```bash
-pip install playwright
-playwright install chromium
 ```
 
 ---
 
 ## Command Cheatsheet by Format
 
-All tools can be invoked via the standalone scripts in `scripts/` or the unified `pdf-to-epub` / `python3 scripts/cli.py` entrypoint.
+Use either the unified `pdf-to-epub` CLI command or invoke `scripts/cli.py` directly:
 
 ### 1. Web Novels & Serialized Fiction
-
 ```bash
-# 1. Probe site structure (detects chapter links, content container, ad blocks)
+# 1. Probe site structure (discovers chapter links, content container, ad blocks)
 pdf-to-epub novel-probe https://novel-site.com/book/toc
 
-# 2. Pilot crawl (verify first 5 chapters before committing to full download)
+# 2. Pilot crawl (downloads & verifies first 5 chapters before full crawl)
 pdf-to-epub crawl2epub https://novel-site.com/book/toc --pilot 5 -o sample.epub
 
-# 3. Full crawl with polite delay (HTTP client - fast & lightweight)
+# 3. Full crawl with polite delay (HTTP client - fast & zero overhead)
 pdf-to-epub crawl2epub https://novel-site.com/book/toc --engine http --delay 1.2 -o novel.epub
 
-# 4. Headless browser crawl (for heavy React / Vue / JS sites)
+# 4. Headless browser crawl (for heavy React / Vue / SPA novel sites)
 pdf-to-epub crawl2epub https://novel-site.com/book/toc --engine playwright -o novel.epub
 
 # 5. Audit cached novel chapters
@@ -136,9 +160,8 @@ python3 scripts/novel_crawler.py verify https://novel-site.com/book/toc
 ---
 
 ### 2. Word Documents (DOCX / ODT)
-
 ```bash
-# Direct DOCX to EPUB3 (No PDF in between! Google Docs layout match)
+# Direct DOCX to EPUB3 (Zero intermediate PDF! Google Docs layout match)
 pdf-to-epub docx2epub document.docx -o book.epub
 
 # Convert with chapter splitting by heading (H1)
@@ -151,9 +174,8 @@ pdf-to-epub docx2pdf document.docx -o document.pdf --preview
 ---
 
 ### 3. LaTeX / TeX Documents
-
 ```bash
-# Convert TeX directly to EPUB3 with native W3C MathML formulas
+# Convert TeX directly to EPUB3 with native W3C MathML equations
 pdf-to-epub tex2epub paper.tex -o paper.epub
 
 # Convert raw snippet or lecture notes (auto-injects amsmath/amssymb preambles)
@@ -163,7 +185,6 @@ pdf-to-epub tex2epub snippet.tex -o snippet.epub --flow single
 ---
 
 ### 4. PowerPoint Presentations (PPTX / PPT)
-
 ```bash
 # Convert slides into structured EPUB3 textbook using Heading Stack & DLA
 pdf-to-epub pptx lecture_slides.pptx -o lecture.epub \
@@ -177,7 +198,6 @@ pdf-to-epub pptx lecture_slides.pptx -o lecture.md --figures figures/
 ---
 
 ### 5. HTML & Online Articles
-
 ```bash
 # Convert an HTML file to EPUB3
 pdf-to-epub html2epub article.html -o article.epub
@@ -185,7 +205,7 @@ pdf-to-epub html2epub article.html -o article.epub
 # Clean web cruft (strips ads, trackers, sidebars, cookie notices)
 pdf-to-epub html2epub article.html -o article.epub --clean-article
 
-# Convert directly from a web URL
+# Convert directly from an online URL
 pdf-to-epub html2epub https://example.com/deep-dive -o deep_dive.epub
 
 # Merge multiple documentation files into a unified multi-chapter book
@@ -195,7 +215,6 @@ pdf-to-epub html2epub ch1.html ch2.html ch3.html -o docs.epub --title "User Manu
 ---
 
 ### 6. Complex PDFs (Vision-First Probing)
-
 ```bash
 # 1. Inspect page count
 pdf-to-epub count paper.pdf
@@ -216,9 +235,6 @@ pdf-to-epub package document.md -o book.epub --figures figures/ --title "Researc
 ---
 
 ### 7. Universal Auto-Detect Converter
-
-The `convert` command auto-routes any file or URL based on its extension or scheme:
-
 ```bash
 pdf-to-epub convert input.docx -o output.epub
 pdf-to-epub convert input.tex  -o output.epub
@@ -232,15 +248,15 @@ pdf-to-epub convert downloaded_novel.zip -o novel.epub
 
 ## DevTools Browser Exporter (Bypass Cloudflare / Paywalls)
 
-When a web novel site is protected by Cloudflare Turnstile, CAPTCHAs, or requires an authenticated user session:
+When a web novel site blocks automated tools with Cloudflare Turnstile, CAPTCHAs, or requires an authenticated session:
 
-1. **Generate the custom console script**:
+1. **Generate the custom browser script**:
    ```bash
    pdf-to-epub novel-console-script https://site.com/novel/ch1
    ```
 2. **Open the browser**:
    - Navigate to Chapter 1 in Chrome/Firefox/Edge while logged in.
-   - Open Developer Tools (`F12` or `Ctrl+Shift+I` / `Cmd+Option+I`) and switch to the **Console** tab.
+   - Press **F12** (or `Ctrl+Shift+I` / `Cmd+Option+I`) and switch to the **Console** tab.
    - Paste the generated snippet and press **Enter**.
 3. **What happens**:
    - The script runs directly within your trusted session.
@@ -253,63 +269,95 @@ When a web novel site is protected by Cloudflare Turnstile, CAPTCHAs, or require
 
 ---
 
-## Guidelines for LLMs & Autonomous Agents
+## Full LLM Guidelines: Web Novel Crawler Operational Manual
 
-If you are an AI assistant (Antigravity, Claude, ChatGPT, Gemini) operating on a user request, adhere to these architectural rules:
-
-### Agent Decision Matrix
+This section defines the mandatory, deterministic protocol that an autonomous AI agent or LLM must follow when a user requests crawling a web novel.
 
 ```mermaid
 flowchart TD
-    Start["User Request / Input Document"] --> Type{"Identify Input Type"}
-    
-    Type -->|"Web Novel / Serial URL"| Nov["novel_crawler.py / crawl2epub"]
-    Type -->|".docx / Word file"| Docx["docx_to_epub.py / docx2epub (Zero PDF)"]
-    Type -->|".tex / LaTeX file"| TeX["tex_to_epub.py / tex2epub (Native MathML)"]
-    Type -->|".pptx / .ppt"| PPT["pptx_parser.py (DLA & Heading Stack)"]
-    Type -->|".html / Article URL"| HTML["html_to_epub.py (Asset Harvester)"]
-    Type -->|".pdf (Scanned / Complex)"| PDF["Adaptive Collage + Parallel Subagents"]
-    
-    Nov --> BotCheck{"Bot / Cloudflare Blocked?"}
-    BotCheck -->|"No"| DirectCrawl["Run crawl --engine http --pilot 5"]
-    BotCheck -->|"Yes"| ConsoleScript["Generate novel-console-script snippet for user"]
+    UserReq["User Request: Crawl Web Novel"] --> Probe["Step 1: Probe Site Structure (novel-probe)"]
+    Probe --> Inspect["Step 2: Inspect JSON Report (TOC, Selector, Ads)"]
+    Inspect --> AskEngine["Step 3: Ask User Engine Choice (HTTP vs Playwright vs DevTools)"]
+    AskEngine --> Pilot["Step 4: Execute Pilot Crawl (--pilot 5)"]
+    Pilot --> Gate{"Step 5: Quality Gate (avg_words > 150, ads = 0)?"}
+    Gate -->|"Pass"| FullCrawl["Step 6: Launch Full Crawl (--delay 1.0)"]
+    Gate -->|"Fail / Blocked"| Fallback["Step 7: Provide DevTools Console Script to User"]
+    Fallback --> ImportZip["Step 8: User Provides ZIP -> import-zip to EPUB3"]
+    FullCrawl --> Done["Step 9: Output Valid EPUB3 & Cache Summary"]
+    ImportZip --> Done
 ```
 
-### 1. Always Ask Before Choosing Crawler Engine
-- Offer the user a clear choice:
-  - `[1] HTTP Client`: Fast, lightweight, zero overhead (recommended default).
-  - `[2] Playwright`: For heavy JavaScript SPAs.
-  - `[3] DevTools Script`: If Cloudflare, bot protections, or login walls block terminal requests.
+### Step-by-Step Agent Protocol
 
-### 2. Math & Equation Rule
-- **Never rasterize simple mathematical formulas**: Convert equations into LaTeX expressions (`$...$` for inline, `$$...$$` for block display). The packager transforms them into standard W3C MathML tags `<math>...</math>`.
-- **Reserve visual crops for visual content only**: Crop geometric sketches, circuit schematics, system architecture diagrams, and loss curve plots via `collage_maker.py crop`.
+#### Phase 1: Pre-Flight Probe
+Never start crawling hundreds of chapters blindly. First probe the target URL:
+```bash
+python3 scripts/cli.py novel-probe <URL>
+```
+Inspect the output JSON:
+- `is_toc_page`: If `true`, the URL is an index page containing ordered chapter links.
+- `toc_links_found`: Total chapter URLs discovered.
+- `detected_content_selector`: The CSS selector of the main story container.
+- `has_next_chapter`: If `true`, the site supports sequential next-link traversal.
 
-### 3. Subagent Block Partitioning (Large PDFs)
-- For PDF documents longer than 12 pages:
-  1. Inspect the total page count with `pdf-to-epub count doc.pdf`.
-  2. Partition into contiguous 4–8 page blocks.
-  3. Spawn parallel worker subagents via `invoke_subagent`.
-  4. Each worker returns Markdown and figure references for its block.
-  5. The parent agent stitches cross-page sentence splits and compiles the EPUB using `epub_packager.py`.
+#### Phase 2: Engine Selection (Always Ask the User First)
+Before launching a long background crawl, ask the user their preferred engine:
+> "I have probed the site structure. Which crawler engine would you like to use?
+> - **[1] HTTP Client (Recommended)**: Fast, lightweight, zero-dependency.
+> - **[2] Playwright**: Headless browser for JavaScript/React-heavy sites.
+> - **[3] DevTools Console Script**: Generates a JavaScript snippet you can paste into your browser (F12) to bypass Cloudflare or paywalls."
 
-### 4. Zero Intermediate PDF for DOCX & TeX
-- **Never convert DOCX or TeX to PDF first** before generating an EPUB.
-- Using PDF as an intermediate format strips semantic tags, fragments paragraphs, and converts native text formulas into fragile bitmaps. Always call `docx_to_epub.py` and `tex_to_epub.py` directly.
+#### Phase 3: Pilot Run (Quality Verification Gate)
+Always run a pilot batch of **3 to 5 chapters** first:
+```bash
+python3 scripts/cli.py crawl2epub <URL> --pilot 5 -o /tmp/pilot.epub
+```
+Audit the health report output:
+- **Average Words per Chapter**: Must be $\ge 150$ words.
+- **Suspicious Short Chapters**: If chapters are flagged with $< 50$ words, inspect `.novel_cache/novels/<slug>/clean_html/ch_0001.html`. This indicates an incorrect content selector or a bot protection wall.
+- **Ad Cleanliness**: Verify that no ad banners, tracking scripts, or sponsor blocks remain.
+
+#### Phase 4: Full Crawl Execution & Rate Limiting
+Once the pilot passes, proceed with the full crawl:
+```bash
+python3 scripts/cli.py crawl2epub <URL> --engine http --delay 1.2 -o novel.epub
+```
+- **Polite Delays**: Always maintain a minimum delay of `1.0s` to `2.0s` between requests to prevent IP bans.
+- **Resumability**: If the crawl is interrupted, re-running the same command automatically resumes from the last cached chapter in `.novel_cache/novels/<slug>/`.
+
+#### Phase 5: Anti-Bot & Cloudflare Fallback Protocol
+If the HTTP client or Playwright receives HTTP 403, 503, or a Cloudflare verification challenge:
+1. **Do not loop or retry in vain.**
+2. Immediately generate the browser DevTools script:
+   ```bash
+   python3 scripts/cli.py novel-console-script <URL>
+   ```
+3. Relay the script to the user with clear instructions:
+   > "The site is protected by Cloudflare/anti-bot checks. Please open Chapter 1 in your browser, press **F12**, paste the script below into the **Console**, and press Enter. It will download `<novel_name>_chapters.zip` directly from your browser."
+4. Once the user has the zip file, convert it directly:
+   ```bash
+   python3 scripts/cli.py convert downloaded_chapters.zip -o novel.epub
+   ```
 
 ---
 
-## Verification & Quality Assurance
+## General LLM & Autonomous Agent Principles
 
-After generating an EPUB from a PDF, run the automated sentence-alignment fidelity check:
+### 1. Math & Equation Preservation
+- **Never rasterize simple mathematical formulas**: Convert equations into standard LaTeX expressions (`$...$` for inline, `$$...$$` for display blocks). The packager transforms them into native W3C MathML (`<math>...</math>`).
+- **Reserve visual crops for diagrams only**: Crop geometric sketches, circuit schematics, system architecture figures, and loss curves via `collage_maker.py crop`.
 
-```bash
-pdf-to-epub verify --pdf original.pdf --epub generated.epub --threshold 95.0
-```
+### 2. Zero Intermediate PDF for DOCX & LaTeX
+- **Never convert DOCX or TeX to PDF first** before generating an EPUB.
+- Intermediate PDFs strip semantic headings, break paragraph continuity, and degrade equations into blurry bitmaps. Always call `docx_to_epub.py` and `tex_to_epub.py` directly.
 
-- **Pass Criterion**: Overall sentence coverage $\ge 95\%$.
-- Identifies missing paragraphs, dropped footnotes, and hallucinated sections.
-- For web novels, run `novel_crawler.py verify <url_or_slug>` to inspect chapter word-count distributions and catch blank chapter traps.
+### 3. Subagent Block Partitioning (Large PDFs)
+- For PDF documents longer than 12 pages:
+  1. Inspect total page count with `pdf-to-epub count doc.pdf`.
+  2. Partition into contiguous 4–8 page blocks.
+  3. Spawn parallel worker subagents using `invoke_subagent`.
+  4. Each worker processes its block concurrently and returns Markdown with figure references.
+  5. The coordinator agent stitches cross-page paragraph cuts and builds the EPUB via `epub_packager.py`.
 
 ---
 
@@ -319,7 +367,7 @@ pdf-to-epub verify --pdf original.pdf --epub generated.epub --threshold 95.0
 pdf2epub/
 ├── install.sh                  # Universal 1-command installer
 ├── requirements.txt            # Python dependencies
-├── SKILL.md                    # Antigravity skill definition & instructions
+├── SKILL.md                    # Antigravity skill specification
 ├── README.md                   # Complete documentation & user guide
 ├── scripts/
 │   ├── cli.py                  # Unified CLI executable (pdf-to-epub)
@@ -332,6 +380,7 @@ pdf2epub/
 │   ├── collage_maker.py        # Visual grid collage (3x3, 2x2, 1x1) & bbox cropper
 │   ├── epub_packager.py        # Zero-dependency standalone EPUB3 packager
 │   ├── dla_analyzer.py         # Document layout analysis & shape classification
+│   ├── build_textbook_edition.py # Pedagogical textbook restructurer
 │   ├── verify_fidelity.py      # Line-by-line quality & sentence coverage verifier
 │   └── compare_with_gold.py    # Gold-standard reference comparison benchmark
 └── tests/                      # Automated test suite
