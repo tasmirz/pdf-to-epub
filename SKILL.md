@@ -1,6 +1,6 @@
 ---
 name: pdf-to-epub
-description: Converts PDF documents into clean, reflowable EPUB3 ebooks and Markdown with high fidelity. Use whenever the user asks to convert PDF to EPUB, turn PDFs into ebooks, convert academic papers or books into reflowable formats, extract math/equations/diagrams from PDF, or process documents using visual collage grid sampling and parallel subagents.
+description: Converts PDF documents, Word files (DOCX/ODT), LaTeX (TeX), PowerPoint presentations (PPTX/PPT), HTML/Web pages, and Web Novels into clean, reflowable EPUB3 ebooks and Markdown with high fidelity. Use whenever the user asks to convert PDF to EPUB, turn PDFs into ebooks, convert Word documents to EPUB (zero intermediate PDF), convert LaTeX/TeX to EPUB3 (native W3C MathML), convert PPTX/PPT to EPUB/Markdown with DLA and heading stacks, crawl web novels into EPUB, extract math/equations/diagrams, or process documents using visual collage grid sampling and parallel subagents.
 ---
 
 # PDF to EPUB Converter Skill

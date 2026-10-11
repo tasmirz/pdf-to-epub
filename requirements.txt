@@ -2,4 +2,7 @@ Pillow>=9.0.0
 PyMuPDF>=1.23.0; sys_platform == 'linux' or sys_platform == 'darwin'
 latex2mathml>=3.77.0
 python-pptx>=1.0.0
+beautifulsoup4>=4.12.0
 pytesseract>=0.3.10
+# Optional: for JavaScript-rendered SPA novel crawling:
+# playwright>=1.40.0
