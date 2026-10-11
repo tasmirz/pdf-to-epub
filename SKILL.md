@@ -34,6 +34,7 @@ A vision-first, parallel multi-agent skill for converting complex PDF documents 
 ## Bundled Helper Utilities
 
 The skill bundles standalone Python scripts located at `~/.gemini/config/skills/pdf-to-epub/scripts/`:
+- `novel_crawler.py`: Web novel crawler, multi-tier ad/watermark cleaner, DevTools console script generator, and EPUB3 packager.
 - `html_to_epub.py`: Direct HTML / XHTML / Web Page to EPUB3 converter (Native MathML, asset bundling, article cleaning).
 - `tex_to_epub.py`: Direct LaTeX / TeX to EPUB3 converter (Native W3C MathML equations, PDF figure transcoding).
 - `docx_to_epub.py`: Direct DOCX to EPUB3 converter (Zero intermediate PDF, automatic font bloat sanitization).
@@ -115,13 +116,47 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/cli.py convert article.html 
 - **Native W3C MathML & Code Blocks**: Preserves `<math>` formulas and formats `<pre><code>` blocks with clean monospace typography.
 - **Multi-File Chapter Merging**: Merges an ordered sequence of HTML files into a structured multi-chapter book with an auto-generated Table of Contents (`nav.xhtml` & `toc.ncx`).
 
-### 4. `docx_to_pdf.py` (Direct Word to PDF)
+### 4. `novel_crawler.py` (Web Novel Crawler, Sanitizer & EPUB3 Builder)
+```bash
+# 1. Probe site structure (discovers content placeholder, ad blocks, and TOC links)
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/novel_crawler.py probe https://site.com/novel/toc
+
+# 2. Pilot Crawl (verifies first 5 chapters before full crawl)
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/novel_crawler.py crawl https://site.com/novel/toc \
+    --engine http --pilot 5 -o novel.epub
+
+# 3. Full Crawl (resumable, polite delay, multi-tier ad stripping)
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/novel_crawler.py crawl https://site.com/novel/toc \
+    --engine http --delay 1.5 -o complete_novel.epub
+
+# 4. Generate DevTools Console Script (paste in browser console to bypass Cloudflare/Paywalls)
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/novel_crawler.py console-script https://site.com/novel/ch1
+
+# 5. Import Browser-Downloaded ZIP directly into EPUB3
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/novel_crawler.py import-zip novel_chapters.zip -o novel.epub
+
+# Via unified CLI
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/cli.py crawl2epub https://site.com/novel/toc -o novel.epub
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/cli.py convert novel_chapters.zip -o novel.epub
+```
+- **No-LLM Algorithmic Scorer**: Discovers chapter content placeholders automatically via DOM text-to-link density profiling (`(p_count * 50 + text_len) * (1 - link_ratio)`), requiring zero LLM tokens.
+- **Multi-Tier Ad & Noise Sanitizer**: Eliminates structural CSS ad selectors, strips hidden anti-scraper text (`display:none`, `opacity:0`), cleans regex watermarks, and flags repeated cross-chapter boilerplates.
+- **Multi-Engine Execution**:
+  - `http`: Fast, lightweight `urllib` client with realistic browser headers, cookies, and exponential backoff retry.
+  - `playwright`: Headless Chromium browser for JavaScript-heavy or single-page applications.
+  - `console`: Standalone JavaScript script that runs directly in the user's browser DevTools, extracts chapters, and downloads a `.zip`.
+- **Structured Workspace & Cache (`.novel_cache/`)**:
+  - `site_recipes/<domain>.json`: Reusable site boundary and selector definitions across novels.
+  - `novels/<slug>/`: Resumable raw HTML and cleaned XHTML cache with `manifest.json`.
+- **Pilot & Verification Diagnostics**: `--pilot N` runs an initial test batch, calculating average words per chapter and warning on suspicious blank or short chapters.
+
+### 5. `docx_to_pdf.py` (Direct Word to PDF)
 ```bash
 # Convert DOCX to high-fidelity vector PDF
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/docx_to_pdf.py document.docx -o document.pdf --preview
 ```
 
-### 5. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown with DLA)
+### 6. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown with DLA)
 ```bash
 # Convert PPTX or legacy PPT directly into reflowable EPUB3 using DLA & Heading Stack
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.pptx \
@@ -141,7 +176,7 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.
 - **Heading Stack State Machine**: Thematically clusters continuation slides into coherent textbook chapters (H1 -> H2 -> continuations), preventing artificial 1-slide page breaks and tiny 2-sentence chapters.
 - **Multimodal Vision Routing**: Routes complex mathematical formulas and text graphics to Vision LLMs for LaTeX MathML transcription, while embedding diagrams/illustrations as-is. Replaces noisy pytesseract OCR.
 
-### 5. `collage_maker.py`
+### 7. `collage_maker.py`
 ```bash
 # 1. Get total page/slide count
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py count document.pdf
@@ -155,7 +190,7 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py crop docume
     --page 3 --coords "150,200,450,850" -o figures/fig_p3_1.png --dpi 300
 ```
 
-### 6. `epub_packager.py`
+### 8. `epub_packager.py`
 ```bash
 # Compile Markdown + cropped figures into valid EPUB3
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/epub_packager.py document.md \
@@ -167,7 +202,7 @@ python3 ~/.gemini/config/skills/pdf-to-epub/scripts/epub_packager.py document.md
     --split-mode auto
 ```
 
-### 7. `verify_fidelity.py` (Line-by-Line Quality & Fidelity Verifier)
+### 9. `verify_fidelity.py` (Line-by-Line Quality & Fidelity Verifier)
 ```bash
 # Run line-by-line verification after each build (supports PDF, PPTX, and PPT)
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/verify_fidelity.py \

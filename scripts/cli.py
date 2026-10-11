@@ -192,6 +192,30 @@ def main():
     p_conv.add_argument("--no-heading-stack", action="store_true", help="Disable heading stack")
     p_conv.add_argument("--no-filter-repetitive", action="store_true", help="Disable repetitive footer filtering")
 
+    # crawl2epub (Web Novel Crawler & Sanitizer to EPUB3)
+    p_c2e = subparsers.add_parser("crawl2epub", help="Crawl, sanitize, and convert a web novel into EPUB3")
+    p_c2e.add_argument("url", help="Novel TOC or Chapter 1 URL")
+    p_c2e.add_argument("-o", "--output", help="Output EPUB filename")
+    p_c2e.add_argument("--engine", choices=["http", "playwright", "console"], help="Crawler engine (http=Fast/lightweight, playwright=JS browser, console=DevTools script)")
+    p_c2e.add_argument("--pilot", type=int, default=None, help="Pilot run count (e.g. 5 chapters for verification)")
+    p_c2e.add_argument("--max-chapters", type=int, default=1000, help="Maximum chapters to crawl")
+    p_c2e.add_argument("--delay", type=float, default=1.0, help="Polite delay between requests (default: 1.0s)")
+
+    # novel-probe
+    p_nprobe = subparsers.add_parser("novel-probe", help="Inspect novel URL and generate draft site recipe")
+    p_nprobe.add_argument("url", help="Novel URL to inspect")
+
+    # novel-console-script
+    p_ncs = subparsers.add_parser("novel-console-script", help="Generate DevTools console script for in-browser extraction")
+    p_ncs.add_argument("url", help="Novel URL")
+    p_ncs.add_argument("--max-chapters", type=int, default=500, help="Max chapters")
+    p_ncs.add_argument("-o", "--output-js", help="Save script to file")
+
+    # novel-import-zip
+    p_nzip = subparsers.add_parser("novel-import-zip", help="Import browser-downloaded novel zip into EPUB3")
+    p_nzip.add_argument("zip_file", help="Path to downloaded novel .zip")
+    p_nzip.add_argument("-o", "--output", help="Output EPUB filename")
+
     # install-skill
     subparsers.add_parser("install-skill", help="Install/link into Antigravity global skills directory")
 
@@ -499,12 +523,80 @@ def main():
                 filter_repetitive=filter_rep
             )
             print(f"[OK] Converted {in_p.name} to EPUB: {out_p}")
+        elif in_p.suffix.lower() == ".zip":
+            from novel_crawler import import_console_zip
+            import_console_zip(in_p, output_epub=out_p)
+            print(f"[OK] Converted novel zip archive to EPUB: {out_p}")
         elif in_p.suffix.lower() == ".md":
             from epub_packager import build_epub3
             build_epub3(str(in_p), str(out_p), figures_dir=args.figures, title=args.title or in_p.stem, author=args.author, lang=args.lang)
             print(f"[OK] Packaged {in_p.name} to EPUB: {out_p}")
         else:
             print(f"[NOTE] For PDF conversion, use subagents or convert to Markdown first then package.")
+    elif args.subcommand == "crawl2epub":
+        from novel_crawler import NovelSession, HttpFetcher, PlaywrightFetcher, prompt_engine_selection
+        engine = args.engine or prompt_engine_selection()
+        session = NovelSession(args.url)
+        if args.delay:
+            session.recipe.delay = args.delay
+
+        if engine == "console":
+            from novel_crawler import ConsoleScriptGenerator
+            js = ConsoleScriptGenerator.generate(args.url, session.recipe.content_selector)
+            print("\n[Engine: Console] Paste this script in your browser DevTools console:")
+            print(js)
+            sys.exit(0)
+
+        fetcher = None
+        if engine == "playwright":
+            fetcher = PlaywrightFetcher(session.recipe)
+        else:
+            fetcher = HttpFetcher(session.recipe)
+
+        try:
+            downloaded = session.crawl(
+                fetcher,
+                pilot_count=args.pilot,
+                max_chapters=args.max_chapters
+            )
+            out_epub = Path(args.output) if args.output else Path(f"{session.slug}.epub")
+            session.export_epub(out_epub)
+            print(f"[OK] Novel crawled and packaged to EPUB: {out_epub}")
+        finally:
+            if hasattr(fetcher, "close"):
+                fetcher.close()
+    elif args.subcommand == "novel-probe":
+        from novel_crawler import NovelSession, HttpFetcher
+        import json
+        session = NovelSession(args.url)
+        fetcher = HttpFetcher(session.recipe)
+        report = session.probe(fetcher)
+        print("\n[Probe Report]:")
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    elif args.subcommand == "novel-console-script":
+        from novel_crawler import NovelSession, ConsoleScriptGenerator
+        session = NovelSession(args.url)
+        js = ConsoleScriptGenerator.generate(
+            start_url=args.url,
+            content_selector=session.recipe.content_selector,
+            title_selector=session.recipe.title_selector,
+            next_selector=session.recipe.next_selector,
+            max_chapters=args.max_chapters
+        )
+        if args.output_js:
+            Path(args.output_js).write_text(js, encoding="utf-8")
+            print(f"[Console Script] Saved script to {args.output_js}")
+        else:
+            print("\n" + "=" * 60)
+            print(" PASTE THIS SCRIPT INTO BROWSER DEVTOOLS CONSOLE (F12):")
+            print("=" * 60)
+            print(js)
+            print("=" * 60)
+    elif args.subcommand == "novel-import-zip":
+        from novel_crawler import import_console_zip
+        zip_path = Path(args.zip_file)
+        out_epub = Path(args.output) if args.output else None
+        import_console_zip(zip_path, out_epub)
     elif args.subcommand == "verify":
         from verify_fidelity import run_verification, print_cli_report
         report = run_verification(args.pdf, args.epub, threshold=args.threshold, verbose=args.verbose)
