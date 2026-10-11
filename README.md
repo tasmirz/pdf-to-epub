@@ -52,8 +52,8 @@ A universal, high-fidelity document conversion engine and agent skill that trans
 ### 1. One-Command Quick Install
 Run this single command on any Linux or macOS system:
 ```bash
-git clone https://github.com/tasmirz/pdf2epub.git
-cd pdf2epub
+git clone https://github.com/tasmirz/pdf-to-epub.git
+cd pdf-to-epub
 chmod +x install.sh && ./install.sh
 ```
 
