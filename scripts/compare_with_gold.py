@@ -119,14 +119,30 @@ def compare_epubs(name, gold_path, gen_path):
         print(f"  [{i+1:2d}] Gold: <{gh[0]}> {gh[1][:32]:<32} | Ours: <{mh[0]}> {mh[1][:32]}")
 
 if __name__ == "__main__":
+    from docx_to_epub import convert_docx_to_epub
+    
+    lab5_docx = "/home/user/Downloads/processed/NLP Lab_5 Transformer_Code_Walkthrough.docx"
+    lab5_gold = "/home/user/Downloads/processed/NLP Lab_5 Transformer_Code_Walkthrough.docx.epub"
+    lab5_out = "/tmp/lab5_fresh.epub"
+    
+    lab3_docx = "/home/user/Downloads/processed/NLP Lab 3_ Word Embeddings & Foundational Classifiers (1).docx"
+    lab3_gold = "/home/user/Downloads/processed/NLP Lab 3_ Word Embeddings & Foundational Classifiers.docx.epub"
+    lab3_out = "/tmp/lab3_fresh.epub"
+    
+    # Ensure fresh conversions exist
+    if os.path.exists(lab5_docx) and not os.path.exists(lab5_out):
+        convert_docx_to_epub(lab5_docx, output_epub=lab5_out, flow_mode="single")
+    if os.path.exists(lab3_docx) and not os.path.exists(lab3_out):
+        convert_docx_to_epub(lab3_docx, output_epub=lab3_out, flow_mode="single")
+    
     compare_epubs(
-        "Lab 5: Transformers",
-        "/home/user/Downloads/processed/NLP Lab_5 Transformer_Code_Walkthrough.docx.epub",
-        "/tmp/lab5_direct.epub"
+        "Lab 5: Transformers (Direct Single Flow vs Gold)",
+        lab5_gold,
+        lab5_out
     )
     print("\n")
     compare_epubs(
-        "Lab 3: Word Embeddings",
-        "/home/user/Downloads/processed/NLP Lab 3_ Word Embeddings & Foundational Classifiers.docx.epub",
-        "/tmp/lab3_direct.epub"
+        "Lab 3: Word Embeddings (Direct Single Flow vs Gold)",
+        lab3_gold,
+        lab3_out
     )
