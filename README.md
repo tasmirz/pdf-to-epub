@@ -1,6 +1,6 @@
 # PDF-to-EPUB: Multi-Format Ebook & Web Novel Suite
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Python: 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![EPUB3 Compliant](https://img.shields.io/badge/EPUB-3.0-green.svg)](https://www.w3.org/publishing/epub3/)
 [![W3C MathML](https://img.shields.io/badge/MathML-Native-purple.svg)](https://www.w3.org/Math/)
@@ -131,45 +131,6 @@ pdf-to-epub convert downloaded_chapters.zip -o novel.epub
 
 ---
 
-## Repository Structure
-
-```text
-pdf-to-epub/
-├── SKILL.md                          # Progressive disclosure specification (<500 lines)
-├── README.md                         # Clean feature overview & multi-LLM setup
-├── USAGE.md                          # Exhaustive tool reference & LLM crawler manual
-├── LICENSE                           # Open source MIT License
-├── requirements.txt                  # Minimal Python dependencies
-├── install.sh                        # Universal 1-command installer
-├── scripts/                          # Executable deterministic code
-│   ├── cli.py                        # Unified CLI router (pdf-to-epub)
-│   ├── novel_crawler.py              # Web novel crawler, ad sanitizer & console script
-│   ├── docx_to_epub.py               # Direct DOCX to EPUB3 (Zero PDF)
-│   ├── docx_to_pdf.py                # Direct DOCX to vector PDF
-│   ├── tex_to_epub.py                # Direct LaTeX to EPUB3 (Native MathML)
-│   ├── html_to_epub.py               # HTML / Web article to EPUB3
-│   ├── pptx_parser.py                # PowerPoint to EPUB3 & Markdown with DLA
-│   ├── collage_maker.py              # Visual grid collage (3x3, 2x2, 1x1) & cropper
-│   ├── epub_packager.py              # Standalone EPUB3 compiler
-│   ├── dla_analyzer.py               # Document layout analysis & shape classification
-│   ├── build_textbook_edition.py     # Pedagogical textbook restructurer
-│   ├── verify_fidelity.py            # Sentence alignment coverage verifier
-│   └── compare_with_gold.py          # Benchmark tester against reference gold standards
-├── references/                       # Deep domain documentation loaded on-demand
-│   ├── crawler_rules.md              # Algorithmic DOM density scoring & anti-bot rules
-│   ├── mathml_standards.md           # W3C MathML namespace, OPF properties & LaTeX rules
-│   └── dla_architecture.md           # Visual collage probing, heading stack & margin purging
-├── assets/                           # Bundled styling, templates, and starter configs
-│   ├── styles/
-│   │   ├── epub_default.css          # Dark-mode-ready EPUB3 stylesheet
-│   │   └── mathml.css                # Mathematical formula styling
-│   └── site_recipes/
-│       └── template_recipe.json      # Starter site recipe for web novel domains
-└── tests/                            # Automated test suite and sample fixtures
-```
-
----
-
 ## License
 
-Released under the [MIT License](LICENSE).
+Released under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE).
