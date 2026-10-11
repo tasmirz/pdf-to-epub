@@ -230,7 +230,7 @@ def parse_presentation(
         slides_text_pos = []
         for slide in prs.slides:
             slide_items = []
-            for shape in extract_shapes_recursive(slide.shapes):
+            for shape in slide.shapes:
                 if shape.has_text_frame:
                     t_str = shape.text_frame.text.strip()
                     if t_str:
@@ -273,6 +273,7 @@ def parse_presentation(
         slide_images = []
         slide_tables = []
         has_ole = False
+        has_diagram_group = False
 
         # Detect Title
         if slide.shapes.title and slide.shapes.title.text.strip():
@@ -280,7 +281,7 @@ def parse_presentation(
             slide_title = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", slide_title).strip()
 
         # Extract Shapes
-        for shape in extract_shapes_recursive(slide.shapes):
+        for shape in slide.shapes:
             if shape == slide.shapes.title:
                 continue
 
@@ -300,6 +301,34 @@ def parse_presentation(
             if shape.shape_type == MSO_SHAPE_TYPE.EMBEDDED_OLE_OBJECT:
                 has_ole = True
 
+            # Group Shape Handling: never unwrap group shapes into text paragraphs!
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                has_diagram_group = True
+
+                # Extract large images nested inside groups (e.g. photos/charts >= 80x80)
+                def extract_large_group_images(grp_shape):
+                    for sub in grp_shape.shapes:
+                        if sub.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                            try:
+                                blob = sub.image.blob
+                                im = Image.open(io.BytesIO(blob))
+                                if im.width >= 80 and im.height >= 80 and (im.width * im.height >= 6400):
+                                    ext = sub.image.ext.lower()
+                                    if ext not in ["png", "jpg", "jpeg", "svg", "webp", "gif"]:
+                                        ext = "png"
+                                    img_name = f"fig_s{s_idx:02d}_{len(slide_images)+1:02d}.{ext}"
+                                    img_path = fig_out / img_name
+                                    img_path.write_bytes(blob)
+                                    extracted_figures.append(img_name)
+                                    slide_images.append((img_name, blob, sub.width, sub.height))
+                            except Exception:
+                                pass
+                        elif sub.shape_type == MSO_SHAPE_TYPE.GROUP:
+                            extract_large_group_images(sub)
+
+                extract_large_group_images(shape)
+                continue
+
             # Table Shape
             if shape.has_table:
                 tbl_md = table_to_markdown(shape.table)
@@ -311,10 +340,13 @@ def parse_presentation(
             if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 try:
                     blob = shape.image.blob
+                    im = Image.open(io.BytesIO(blob))
+                    # Filter out tiny icon / bullet images (e.g. 34x35 px dots)
+                    if im.width < 80 or im.height < 80 or (im.width * im.height < 6400):
+                        continue
                     ext = shape.image.ext.lower()
                     if ext not in ["png", "jpg", "jpeg", "svg", "webp", "gif"]:
                         try:
-                            im = Image.open(io.BytesIO(blob))
                             buf = io.BytesIO()
                             im.save(buf, format="PNG")
                             blob = buf.getvalue()
@@ -349,9 +381,20 @@ def parse_presentation(
                             slide_title = p_text
                             continue
 
+                    cleaned_p = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", p_text).strip()
+
+                    # Filter isolated 1-2 character text paragraphs (e.g. "N", "M", "Q", "=", "\", ")")
+                    if len(cleaned_p) <= 2 and not re.match(r"^\d+$", cleaned_p):
+                        continue
+
+                    # Filter floating diagram labels when slide has diagram groups
+                    if has_diagram_group and len(cleaned_p) <= 12 and not p.level and len(txt_f.paragraphs) == 1:
+                        if re.match(r"^[a-zA-Z0-9_'\"\-]+(?:\s+[a-zA-Z0-9_'\"\-]+)?$", cleaned_p):
+                            if not re.search(r"\b(let|step|think|pick|transform|rotate|align|scale|inverse|reflection|matrix|plane|vector)\b", cleaned_p, re.I):
+                                continue
+
                     # Markdown bullet formatting
                     indent = "  " * p.level
-                    cleaned_p = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", p_text).strip()
 
                     # Bold / italic run preservation
                     styled_text = cleaned_p
@@ -424,6 +467,58 @@ def parse_presentation(
             section_lines.append(tbl)
             section_lines.append("")
 
+        # Diagram Group Classification & PDF High-Res Cropping
+        if has_diagram_group:
+            groups = [sh for sh in slide.shapes if sh.shape_type == MSO_SHAPE_TYPE.GROUP]
+            total_subs = sum(len(g.shapes) for g in groups)
+            non_empty_short = sum(
+                1 for g in groups for sub in g.shapes
+                if sub.has_text_frame and 0 < len(sub.text_frame.text.strip()) <= 2
+            )
+            is_drawn_equation = (non_empty_short / max(1, total_subs)) > 0.35
+
+            if is_drawn_equation:
+                has_ole = True  # Treat drawn formula shapes as equation slides
+            elif not slide_images and pdf_doc and s_idx <= len(pdf_doc):
+                # Geometric diagram: crop diagram region from PDF
+                try:
+                    sw = float(prs.slide_width) if prs.slide_width else 9144000.0
+                    sh = float(prs.slide_height) if prs.slide_height else 5143500.0
+                    min_x = min(g.left for g in groups) / sw
+                    min_y = min(g.top for g in groups) / sh
+                    max_x = max(g.left + g.width for g in groups) / sw
+                    max_y = max(g.top + g.height for g in groups) / sh
+
+                    for shp in slide.shapes:
+                        if shp.has_text_frame and shp != slide.shapes.title:
+                            tx0 = shp.left / sw
+                            ty0 = shp.top / sh
+                            tx1 = (shp.left + shp.width) / sw
+                            ty1 = (shp.top + shp.height) / sh
+                            if 0.12 <= ty0 <= 0.88 and (tx0 >= min_x - 0.15 and tx1 <= max_x + 0.15):
+                                min_x = min(min_x, tx0)
+                                min_y = min(min_y, ty0)
+                                max_x = max(max_x, tx1)
+                                max_y = max(max_y, ty1)
+
+                    pad = 0.03
+                    crop_x0 = max(0.0, min_x - pad)
+                    crop_y0 = max(0.12, min_y - pad)
+                    crop_x1 = min(1.0, max_x + pad)
+                    crop_y1 = min(0.90, max_y + pad)
+
+                    p_page = pdf_doc[s_idx - 1]
+                    pw, ph = p_page.rect.width, p_page.rect.height
+                    clip_rect = fitz.Rect(crop_x0 * pw, crop_y0 * ph, crop_x1 * pw, crop_y1 * ph)
+                    pix = p_page.get_pixmap(clip=clip_rect, dpi=180)
+                    diag_name = f"fig_s{s_idx:02d}_diagram.png"
+                    diag_path = fig_out / diag_name
+                    pix.save(str(diag_path))
+                    extracted_figures.append(diag_name)
+                    slide_images.append((diag_name, pix.tobytes("png"), int(clip_rect.width), int(clip_rect.height)))
+                except Exception:
+                    pass
+
         # DLA Image & Vision Classification
         total_text_len = sum(len(b) for b in slide_text_blocks)
         for img_name, img_bytes, w, h in slide_images:
@@ -462,9 +557,10 @@ def parse_presentation(
                 "action": "transcribe_latex"
             })
             if transcriptions and s_idx in transcriptions:
-                section_lines.append(transcriptions[s_idx])
-                section_lines.append("")
-            elif pdf_doc and s_idx <= len(pdf_doc):
+                if not slide_images:
+                    section_lines.append(transcriptions[s_idx])
+                    section_lines.append("")
+            elif pdf_doc and s_idx <= len(pdf_doc) and not slide_images:
                 # High-res visual crop fallback: crop equation from rendered slide
                 try:
                     p_page = pdf_doc[s_idx - 1]
@@ -581,9 +677,16 @@ def main():
     parser.add_argument("--no-heading-stack", action="store_true", help="Disable heading stack (split every slide)")
     parser.add_argument("--no-filter-repetitive", action="store_true", help="Disable repetitive footer/header filtering")
     parser.add_argument("--manifest", help="Optional path to output DLA manifest JSON")
+    parser.add_argument("--transcriptions", help="Optional path to JSON mapping slide_idx to LaTeX/Markdown")
 
     args = parser.parse_args()
     out_p = Path(args.output).resolve()
+
+    transcriptions = None
+    if args.transcriptions and os.path.exists(args.transcriptions):
+        with open(args.transcriptions, "r", encoding="utf-8") as f:
+            raw_t = json.load(f)
+            transcriptions = {int(k): v for k, v in raw_t.items()}
 
     if out_p.suffix.lower() == ".epub":
         pptx_to_epub(
@@ -593,6 +696,7 @@ def main():
             title=args.title,
             author=args.author,
             lang=args.lang,
+            transcriptions=transcriptions,
             use_heading_stack=not args.no_heading_stack,
             filter_repetitive=not args.no_filter_repetitive
         )
@@ -601,6 +705,7 @@ def main():
         res = parse_presentation(
             pptx_path=args.presentation,
             figures_dir=args.figures,
+            transcriptions=transcriptions,
             use_heading_stack=not args.no_heading_stack,
             filter_repetitive=not args.no_filter_repetitive
         )

@@ -34,13 +34,36 @@ A vision-first, parallel multi-agent skill for converting complex PDF documents 
 ## Bundled Helper Utilities
 
 The skill bundles standalone Python scripts located at `~/.gemini/config/skills/pdf-to-epub/scripts/`:
+- `docx_to_epub.py`: Direct DOCX to EPUB3 converter (Zero intermediate PDF, automatic font bloat sanitization).
+- `docx_to_pdf.py`: Direct DOCX / Word to PDF converter with sandboxed profile isolation.
 - `pptx_parser.py`: Direct PowerPoint (PPTX / PPT) to Markdown & EPUB3 extraction engine with DLA.
 - `collage_maker.py`: Adaptive visual grid collage generator and region cropper (supports PDF, PPTX, PPT with 3x2, 2x2, 3x3).
 - `epub_packager.py`: Self-contained EPUB3 compiler with native W3C MathML and single/multi-flow layout.
 - `verify_fidelity.py`: Line-by-line quality and fidelity verifier with sentence alignment coverage.
 - `cli.py`: Unified command-line interface (`pdf-to-epub`).
 
-### 1. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown with DLA)
+### 1. `docx_to_epub.py` (Direct Word to EPUB3 — No PDF In Between)
+```bash
+# Convert DOCX directly to clean EPUB3 (matches Google Docs gold reference size ~500KB)
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/docx_to_epub.py document.docx -o document.epub
+
+# Via unified CLI
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/cli.py docx2epub document.docx -o document.epub
+
+# Batch convert a folder of DOCX files directly to EPUB3
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/docx_to_epub.py docs_folder/ --outdir epubs/
+```
+- **Zero Intermediate PDF**: Bypasses PDF generation entirely, preserving true semantic reflow, inline code tables, lists, and embedded images directly from Word XML.
+- **Automatic Font Bloat Sanitization**: Strips 40MB+ of embedded system fonts (`OEBPS/fonts/*.otf`) that LibreOffice injects by default, shrinking bloated 32MB EPUBs down to ~500KB (identical to Google Docs export).
+- **Dual Engine Architecture**: Defaults to LibreOffice headless with auto-sanitization, falling back to pure-Python semantic parsing (`mammoth` + `epub_packager.py`).
+
+### 2. `docx_to_pdf.py` (Direct Word to PDF)
+```bash
+# Convert DOCX to high-fidelity vector PDF
+python3 ~/.gemini/config/skills/pdf-to-epub/scripts/docx_to_pdf.py document.docx -o document.pdf --preview
+```
+
+### 3. `pptx_parser.py` (PowerPoint to EPUB3 & Markdown with DLA)
 ```bash
 # Convert PPTX or legacy PPT directly into reflowable EPUB3 using DLA & Heading Stack
 python3 ~/.gemini/config/skills/pdf-to-epub/scripts/pptx_parser.py presentation.pptx \

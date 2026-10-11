@@ -264,6 +264,11 @@ def lint_epub_markup(epub_data: Dict[str, Any]) -> List[str]:
             if basename not in existing_imgs:
                 issues.append(f"[{fname}] Image source '{src}' missing from EPUB assets.")
 
+        # 7. Single-character paragraph cascades (e.g. leaked vector drawing labels N, M, Q)
+        short_paras = re.findall(r"<p>\s*([a-zA-Z0-9_\-+=\\(\)\[\]]{1,2})\s*</p>", xhtml)
+        if len(short_paras) >= 5:
+            issues.append(f"[{fname}] Leaked vector drawing labels / single-character cascade detected ({len(short_paras)} occurrences: {short_paras[:6]}).")
+
     return issues
 
 
