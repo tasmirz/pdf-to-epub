@@ -151,6 +151,7 @@ def main():
     p_d2e.add_argument("inputs", nargs="+", help="Input .docx file(s), folder, or glob pattern")
     p_d2e.add_argument("-o", "--output", help="Exact output EPUB file (for single document input)")
     p_d2e.add_argument("-d", "--outdir", help="Output directory for generated EPUBs")
+    p_d2e.add_argument("--flow", choices=["single", "split"], default="single", help="EPUB XHTML flow architecture (default: single, matching Google Docs)")
     p_d2e.add_argument("--keep-fonts", action="store_true", help="Do not strip embedded system fonts")
     p_d2e.add_argument("--engine", choices=["auto", "office", "semantic"], default="auto", help="Conversion engine")
     p_d2e.add_argument("--title", help="Document title metadata")
@@ -160,6 +161,7 @@ def main():
     p_conv = subparsers.add_parser("convert", help="Universal converter for DOCX, PDF, PPTX, and PPT to EPUB3 or PDF")
     p_conv.add_argument("input", help="Path to input document (.docx, .pdf, .pptx, or .ppt)")
     p_conv.add_argument("-o", "--output", required=True, help="Output .epub or .pdf file")
+    p_conv.add_argument("--flow", choices=["single", "split"], default="single", help="EPUB flow architecture for DOCX conversion")
     p_conv.add_argument("--title", help="Document title")
     p_conv.add_argument("--author", default="Unknown Author", help="Author name")
     p_conv.add_argument("--lang", default="en", help="Language code")
@@ -280,6 +282,7 @@ def main():
                 output_epub=out_epub,
                 outdir=args.outdir,
                 strip_fonts=strip_fonts,
+                flow_mode=getattr(args, "flow", "single"),
                 title=args.title,
                 author=args.author,
                 engine=args.engine
@@ -312,6 +315,7 @@ def main():
                 res = convert_docx_to_epub(
                     str(in_p),
                     output_epub=str(out_p),
+                    flow_mode=getattr(args, "flow", "single"),
                     title=args.title,
                     author=args.author
                 )
