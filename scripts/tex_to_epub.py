@@ -99,16 +99,16 @@ def prepare_tex_source(
 
     src_dir = tex_path.parent
 
-    # 1. Handle referenced PDF images: EPUB requires raster or SVG images, not PDF
+    # 1. Handle referenced PDF images and strip restrictive scale options
     def replace_graphics(match):
-        full_match = match.group(0)
+        opt = match.group(1) or ""
         img_arg = match.group(2)
-        # Check if img_arg points to a file with .pdf or without extension
         candidates = [img_arg]
         if not img_arg.lower().endswith((".png", ".jpg", ".jpeg", ".svg", ".pdf")):
             candidates.append(f"{img_arg}.pdf")
             candidates.append(f"{img_arg}.png")
 
+        final_arg = img_arg
         for cand in candidates:
             cand_p = (src_dir / cand).resolve()
             if cand_p.exists() and cand_p.suffix.lower() == ".pdf":
@@ -123,19 +123,43 @@ def prepare_tex_source(
                             check=True,
                             capture_output=True
                         )
-                        return f"\\includegraphics{match.group(1)}{{{out_png_name}}}"
+                        final_arg = out_png_name
+                        break
                     except Exception:
                         pass
-        return full_match
+
+        # Clean restrictive scale options that cause TeX4ht to emit 20px thumbnails
+        if opt:
+            cleaned_opt = re.sub(r"scale\s*=\s*[\d\.]+\s*,?", "", opt)
+            cleaned_opt = re.sub(r",\s*\]", "]", cleaned_opt)
+            cleaned_opt = re.sub(r"\[\s*,", "[", cleaned_opt)
+            if cleaned_opt in ["[]", ""]:
+                cleaned_opt = ""
+            return f"\\includegraphics{cleaned_opt}{{{final_arg}}}"
+        return f"\\includegraphics{{{final_arg}}}"
 
     content = re.sub(r"\\includegraphics(\[[^\]]*\])?\{([^}]+)\}", replace_graphics, content)
 
-    # 2. Copy all local assets (images, styles, bib) into work_dir
+    # 2. Copy all local assets (images, styles, bib, bbl) into work_dir
     for item in src_dir.iterdir():
-        if item.is_file() and item.suffix.lower() in [".png", ".jpg", ".jpeg", ".gif", ".svg", ".bib", ".sty", ".cls", ".bst"]:
+        if item.is_file() and item.suffix.lower() in [
+            ".png", ".jpg", ".jpeg", ".gif", ".svg", ".bib", ".sty", ".cls", ".bst", ".bbl", ".bcf", ".xml", ".eps"
+        ]:
             dest = work_dir / item.name
             if not dest.exists():
                 shutil.copy2(item, dest)
+
+    out_tex = work_dir / tex_path.name
+
+    # Ensure target stem .bbl exists so LaTeX resolves citations on first pass without [?]
+    target_bbl = work_dir / f"{out_tex.stem}.bbl"
+    if not target_bbl.exists():
+        main_bbl = src_dir / "main.bbl"
+        bbl_files = list(src_dir.glob("*.bbl"))
+        if main_bbl.exists():
+            shutil.copy2(main_bbl, target_bbl)
+        elif bbl_files:
+            shutil.copy2(bbl_files[0], target_bbl)
 
     # 3. Inject preamble if document is a fragment
     if not has_documentclass:
@@ -236,18 +260,186 @@ def merge_epub_to_single_flow(
             nav_p.write_text(nav_text, encoding="utf-8")
 
         # Repack
-        temp_out = src.parent / f"tmp_single_{os.getpid()}_{int(time.time()*1000)}.epub"
-        with zipfile.ZipFile(temp_out, "w", compression=zipfile.ZIP_DEFLATED) as zout:
-            for root, _, files in os.walk(temp_dir):
-                for fname in files:
-                    full_p = os.path.join(root, fname)
-                    rel_p = os.path.relpath(full_p, temp_dir)
-                    if rel_p == "mimetype":
-                        zout.writestr(rel_p, open(full_p, "rb").read(), compress_type=zipfile.ZIP_STORED)
-                    else:
-                        zout.write(full_p, rel_p)
+        repack_epub(Path(temp_dir), dst)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
-        shutil.move(str(temp_out), str(dst))
+    return dst
+
+
+def repack_epub(source_dir: Path, output_epub: Path) -> Path:
+    """Repack a directory into an EPUB3 zip archive, ensuring mimetype is stored first uncompressed."""
+    temp_out = output_epub.parent / f"tmp_repack_{os.getpid()}_{int(time.time()*1000)}.epub"
+    with zipfile.ZipFile(temp_out, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+        mimetype_p = source_dir / "mimetype"
+        if mimetype_p.exists():
+            zout.writestr("mimetype", mimetype_p.read_bytes(), compress_type=zipfile.ZIP_STORED)
+
+        for root, dirs, files in os.walk(source_dir):
+            dirs.sort()
+            for fname in sorted(files):
+                full_p = Path(root) / fname
+                rel_p = full_p.relative_to(source_dir)
+                if str(rel_p) == "mimetype":
+                    continue
+                zout.write(full_p, str(rel_p))
+
+    shutil.move(str(temp_out), str(output_epub))
+    return output_epub
+
+
+def postprocess_epub_xhtml(
+    epub_path: Union[str, Path],
+    output_path: Optional[Union[str, Path]] = None
+) -> Path:
+    """
+    Post-processes the generated EPUB:
+    1. Injects xmlns="http://www.w3.org/1998/Math/MathML" into all <math> tags.
+    2. Injects xmlns:m="http://www.w3.org/1998/Math/MathML" into <html> tags.
+    3. Strips hardcoded height/width attributes from <img> tags and enforces responsive CSS.
+    4. Cleans ugly footnote underscore dividers (_{8,}) and dingbat artifacts into clean <hr class="footnote-rule"/>.
+    5. Injects publication-grade responsive CSS and MathML styles.
+    6. Ensures properties="mathml" is declared in content.opf.
+    """
+    src = Path(epub_path).resolve()
+    dst = Path(output_path).resolve() if output_path else src
+
+    temp_dir = tempfile.mkdtemp(prefix="tex_postprocess_")
+    try:
+        with zipfile.ZipFile(src, "r") as zin:
+            zin.extractall(temp_dir)
+
+        root_p = Path(temp_dir)
+
+        # 1. Enrich existing CSS files with publication rules
+        css_rules = (
+            "\n\n/* === PDF-to-EPUB Publication Enhancements === */\n"
+            "body {\n"
+            "    font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Georgia, serif;\n"
+            "    line-height: 1.65;\n"
+            "    color: #1a1a1a;\n"
+            "}\n"
+            "img {\n"
+            "    max-width: 100% !important;\n"
+            "    height: auto !important;\n"
+            "    display: block !important;\n"
+            "    margin: 1.2em auto !important;\n"
+            "}\n"
+            "figure {\n"
+            "    max-width: 100% !important;\n"
+            "    margin: 1.5em auto !important;\n"
+            "    text-align: center;\n"
+            "}\n"
+            "figcaption, .caption {\n"
+            "    font-size: 0.9em;\n"
+            "    color: #555555;\n"
+            "    margin-top: 0.5em;\n"
+            "    text-align: center;\n"
+            "    font-style: italic;\n"
+            "}\n"
+            "hr.footnote-rule {\n"
+            "    border: none !important;\n"
+            "    border-top: 1px solid #d0d0d0 !important;\n"
+            "    width: 35% !important;\n"
+            "    margin: 2em 0 1em 0 !important;\n"
+            "}\n"
+            "math {\n"
+            "    font-family: \"STIX Two Math\", \"Cambria Math\", \"Latin Modern Math\", serif;\n"
+            "    font-style: normal;\n"
+            "}\n"
+            "math[display=\"block\"], .display-equation, table.equation {\n"
+            "    display: block !important;\n"
+            "    margin: 1.2em auto !important;\n"
+            "    text-align: center !important;\n"
+            "    overflow-x: auto !important;\n"
+            "    overflow-y: hidden !important;\n"
+            "    max-width: 100% !important;\n"
+            "    padding: 0.5em 0;\n"
+            "}\n"
+            "math[display=\"inline\"] {\n"
+            "    display: inline !important;\n"
+            "    vertical-align: baseline !important;\n"
+            "}\n"
+            "table.equation td {\n"
+            "    border: none !important;\n"
+            "    padding: 0.2em 0.5em !important;\n"
+            "}\n"
+            "td.eq-no {\n"
+            "    text-align: right !important;\n"
+            "    font-weight: normal;\n"
+            "}\n"
+            "a {\n"
+            "    color: #0366d6;\n"
+            "    text-decoration: none;\n"
+            "}\n"
+            "a:hover {\n"
+            "    text-decoration: underline;\n"
+            "}\n"
+        )
+
+        css_files = list(root_p.glob("**/*.css"))
+        for cf in css_files:
+            cf_text = cf.read_text(encoding="utf-8", errors="replace")
+            # Remove any broken mrow inline-block
+            cf_text = re.sub(r'mrow\s*\{\s*display:\s*inline-block;\s*\}', '', cf_text)
+            cf.write_text(cf_text + css_rules, encoding="utf-8")
+
+        # 2. Process all XHTML files
+        xhtml_files = list(root_p.glob("**/*.xhtml")) + list(root_p.glob("**/*.html"))
+        has_math = False
+        for xf in xhtml_files:
+            text = xf.read_text(encoding="utf-8", errors="replace")
+
+            # A. Ensure MathML namespaces
+            if "<math" in text:
+                has_math = True
+                # Inject xmlns:m into <html> if not present
+                text = re.sub(r'<html(?![^>]*\bxmlns:m\b)', r'<html xmlns:m="http://www.w3.org/1998/Math/MathML"', text)
+                # Inject xmlns into all <math> tags if not present
+                text = re.sub(r'<math(?![^>]*\bxmlns\b)', r'<math xmlns="http://www.w3.org/1998/Math/MathML"', text)
+
+            # B. Clean <img> tags: remove dummy width/height and add responsive styling
+            def clean_img(m):
+                tag = m.group(0)
+                tag = re.sub(r'\s+width=[\'"][^\'"]*[\'"]', '', tag)
+                tag = re.sub(r'\s+height=[\'"][^\'"]*[\'"]', '', tag)
+                if 'style="' in tag:
+                    tag = tag.replace('style="', 'style="max-width: 100%; height: auto; display: block; margin: 1.2em auto; ')
+                elif "style='" in tag:
+                    tag = tag.replace("style='", "style='max-width: 100%; height: auto; display: block; margin: 1.2em auto; ")
+                else:
+                    tag = re.sub(r'<img\s+', '<img style="max-width: 100%; height: auto; display: block; margin: 1.2em auto;" ', tag)
+                return tag
+
+            text = re.sub(r'<img[^>]*>', clean_img, text)
+
+            # C. Clean template noise: replace underscore lines and dingbat artifacts
+            text = re.sub(r'<p[^>]*>\s*_{8,}.*?</p>', '<hr class="footnote-rule"/>', text, flags=re.DOTALL)
+            text = re.sub(r'(\s*_{8,}\s*)+', '<hr class="footnote-rule"/>', text)
+            text = re.sub(r'<span class=[\'"]pzdr[^\'"]*[\'"]>\s*✦\s*</span>', '', text)
+            text = re.sub(r'<p[^>]*>\s*</p>', '', text)
+
+            xf.write_text(text, encoding="utf-8")
+
+        # 3. Update content.opf properties="mathml" if math is present
+        if has_math:
+            opf_files = list(root_p.glob("**/*.opf"))
+            for opf in opf_files:
+                opf_text = opf.read_text(encoding="utf-8", errors="replace")
+                for xf in xhtml_files:
+                    pattern = rf'(<item [^>]*href=[\'"]{re.escape(xf.name)}[\'"][^>]*)>'
+                    def add_mathml_prop(m):
+                        tag = m.group(1)
+                        if "properties=" not in tag:
+                            return f'{tag} properties="mathml">'
+                        elif "mathml" not in tag:
+                            return re.sub(r'properties=[\'"]([^\'"]*)[\'"]', r'properties="\1 mathml"', tag) + '>'
+                        return m.group(0)
+                    opf_text = re.sub(pattern, add_mathml_prop, opf_text)
+                opf.write_text(opf_text, encoding="utf-8")
+
+        # 4. Repack EPUB
+        repack_epub(root_p, dst)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -339,6 +531,12 @@ def convert_via_tex4ebook(
         except Exception:
             pass
 
+    # Post-process EPUB for MathML namespaces, responsive images, and clean typography
+    try:
+        postprocess_epub_xhtml(output_epub)
+    except Exception:
+        pass
+
     return {
         "success": True,
         "output_path": str(output_epub),
@@ -404,6 +602,12 @@ def convert_via_make4ht(
             author=author or "TeX Document Author",
             split_mode="single"
         )
+
+        try:
+            postprocess_epub_xhtml(output_epub)
+        except Exception:
+            pass
+
 
     return {
         "success": True,

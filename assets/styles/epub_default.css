@@ -73,11 +73,33 @@ pre > code {
 }
 
 img {
-    max-width: 100%;
-    height: auto;
-    display: block;
-    margin: 1.5em auto;
+    max-width: 100% !important;
+    height: auto !important;
+    display: block !important;
+    margin: 1.5em auto !important;
 }
+
+figure {
+    max-width: 100%;
+    margin: 1.5em auto;
+    text-align: center;
+}
+
+figcaption, .caption {
+    font-size: 0.9em;
+    color: #555555;
+    margin-top: 0.5em;
+    text-align: center;
+    font-style: italic;
+}
+
+hr.footnote-rule {
+    border: none;
+    border-top: 1px solid #d0d0d0;
+    width: 35%;
+    margin: 2em 0 1em 0;
+}
+
 
 table {
     border-collapse: collapse;
