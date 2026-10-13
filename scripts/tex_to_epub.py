@@ -140,7 +140,46 @@ def prepare_tex_source(
 
     content = re.sub(r"\\includegraphics(\[[^\]]*\])?\{([^}]+)\}", replace_graphics, content)
 
-    # 2. Copy all local assets (images, styles, bib, bbl) into work_dir
+    # 2. Inject TeX4ht graphics override so LaTeX avoids loading dvips.def graphics driver.
+    # The default driver corrupts TeX4ht's internal MathML font mapping tables, causing <mi>/<mo>/<mn> to be dropped.
+    hcode_img_override = (
+        "\n\\makeatletter\n"
+        "\\AtBeginDocument{%\n"
+        "  \\providecommand\\HCode[1]{}%\n"
+        "  \\providecommand{\\includegraphics}[2][]{}%\n"
+        "  \\renewcommand{\\includegraphics}[2][]{%\n"
+        "    \\HCode{<img src=\"#2\" alt=\"PIC\" />}%\n"
+        "  }%\n"
+        "}\n"
+        "\\makeatother\n"
+    )
+
+    if has_documentclass:
+        doc_idx = content.find(r"\begin{document}")
+        if doc_idx != -1:
+            content = content[:doc_idx] + hcode_img_override + content[doc_idx:]
+        else:
+            content = hcode_img_override + content
+    else:
+        doc_title = title or tex_path.stem.replace("_", " ")
+        doc_author = author or "Author"
+        preamble = (
+            "\\documentclass[11pt]{article}\n"
+            "\\usepackage[utf8]{inputenc}\n"
+            "\\usepackage{amsmath,amssymb,amsfonts,amsthm}\n"
+            "\\usepackage{graphicx}\n"
+            "\\usepackage{booktabs}\n"
+            "\\usepackage{hyperref}\n"
+            f"\\title{{{doc_title}}}\n"
+            f"\\author{{{doc_author}}}\n"
+            + hcode_img_override +
+            "\\begin{document}\n"
+            "\\maketitle\n\n"
+        )
+        postamble = "\n\n\\end{document}\n"
+        content = preamble + content + postamble
+
+    # 3. Copy all local assets (images, styles, bib, bbl) into work_dir
     for item in src_dir.iterdir():
         if item.is_file() and item.suffix.lower() in [
             ".png", ".jpg", ".jpeg", ".gif", ".svg", ".bib", ".sty", ".cls", ".bst", ".bbl", ".bcf", ".xml", ".eps"
@@ -161,24 +200,6 @@ def prepare_tex_source(
         elif bbl_files:
             shutil.copy2(bbl_files[0], target_bbl)
 
-    # 3. Inject preamble if document is a fragment
-    if not has_documentclass:
-        doc_title = title or tex_path.stem.replace("_", " ")
-        doc_author = author or "Author"
-        preamble = (
-            "\\documentclass[11pt]{article}\n"
-            "\\usepackage[utf8]{inputenc}\n"
-            "\\usepackage{amsmath,amssymb,amsfonts,amsthm}\n"
-            "\\usepackage{graphicx}\n"
-            "\\usepackage{booktabs}\n"
-            "\\usepackage{hyperref}\n"
-            f"\\title{{{doc_title}}}\n"
-            f"\\author{{{doc_author}}}\n"
-            "\\begin{document}\n"
-            "\\maketitle\n\n"
-        )
-        postamble = "\n\n\\end{document}\n"
-        content = preamble + content + postamble
 
     out_tex = work_dir / tex_path.name
     out_tex.write_text(content, encoding="utf-8")
@@ -290,16 +311,18 @@ def repack_epub(source_dir: Path, output_epub: Path) -> Path:
 
 def postprocess_epub_xhtml(
     epub_path: Union[str, Path],
-    output_path: Optional[Union[str, Path]] = None
+    output_path: Optional[Union[str, Path]] = None,
+    assets_dir: Optional[Union[str, Path, List[Union[str, Path]]]] = None
 ) -> Path:
     """
     Post-processes the generated EPUB:
     1. Injects xmlns="http://www.w3.org/1998/Math/MathML" into all <math> tags.
     2. Injects xmlns:m="http://www.w3.org/1998/Math/MathML" into <html> tags.
     3. Strips hardcoded height/width attributes from <img> tags and enforces responsive CSS.
-    4. Cleans ugly footnote underscore dividers (_{8,}) and dingbat artifacts into clean <hr class="footnote-rule"/>.
-    5. Injects publication-grade responsive CSS and MathML styles.
-    6. Ensures properties="mathml" is declared in content.opf.
+    4. Bundles referenced figures/images into OEBPS and declares them in content.opf manifest.
+    5. Cleans ugly footnote underscore dividers (_{8,}) and dingbat artifacts into clean <hr class="footnote-rule"/>.
+    6. Injects publication-grade responsive CSS and MathML styles.
+    7. Ensures properties="mathml" is declared in content.opf.
     """
     src = Path(epub_path).resolve()
     dst = Path(output_path).resolve() if output_path else src
@@ -310,6 +333,9 @@ def postprocess_epub_xhtml(
             zin.extractall(temp_dir)
 
         root_p = Path(temp_dir)
+        oebps_dir = root_p / "OEBPS"
+        if not oebps_dir.exists():
+            oebps_dir = root_p
 
         # 1. Enrich existing CSS files with publication rules
         css_rules = (
@@ -421,11 +447,59 @@ def postprocess_epub_xhtml(
 
             xf.write_text(text, encoding="utf-8")
 
-        # 3. Update content.opf properties="mathml" if math is present
-        if has_math:
-            opf_files = list(root_p.glob("**/*.opf"))
-            for opf in opf_files:
-                opf_text = opf.read_text(encoding="utf-8", errors="replace")
+        # 3. Bundle referenced images into OEBPS and update content.opf
+        opf_files = list(root_p.glob("**/*.opf"))
+        opf_p = opf_files[0] if opf_files else None
+
+        if opf_p:
+            opf_text = opf_p.read_text(encoding="utf-8", errors="replace")
+            candidate_dirs = []
+            if assets_dir:
+                if isinstance(assets_dir, (list, tuple)):
+                    for ad in assets_dir:
+                        if ad:
+                            candidate_dirs.append(Path(ad))
+                else:
+                    candidate_dirs.append(Path(assets_dir))
+            candidate_dirs.append(src.parent)
+
+            for xf in xhtml_files:
+                text = xf.read_text(encoding="utf-8", errors="replace")
+                img_srcs = re.findall(r'<img[^>]+src=[\'"]([^\'"]+)[\'"]', text)
+                for src_name in img_srcs:
+                    if src_name.startswith(("http://", "https://", "data:")):
+                        continue
+                    target_img = oebps_dir / src_name
+                    if not target_img.exists():
+                        for cd in candidate_dirs:
+                            src_candidate = cd / src_name
+                            if src_candidate.exists():
+                                target_img.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(src_candidate, target_img)
+                                break
+                    if target_img.exists() and f'href="{src_name}"' not in opf_text and f"href='{src_name}'" not in opf_text:
+                        lower_src = src_name.lower()
+                        if lower_src.endswith(".png"):
+                            mime = "image/png"
+                        elif lower_src.endswith((".jpg", ".jpeg")):
+                            mime = "image/jpeg"
+                        elif lower_src.endswith(".gif"):
+                            mime = "image/gif"
+                        elif lower_src.endswith(".svg"):
+                            mime = "image/svg+xml"
+                        elif lower_src.endswith(".webp"):
+                            mime = "image/webp"
+                        else:
+                            mime = "application/octet-stream"
+                        item_id = f"img_{re.sub(r'[^a-zA-Z0-9_]', '_', src_name)}"
+                        item_tag = f'<item href="{src_name}" id="{item_id}" media-type="{mime}"/>'
+                        if "<manifest>" in opf_text:
+                            opf_text = opf_text.replace("<manifest>", f"<manifest>\n{item_tag}")
+                        elif "<manifest " in opf_text:
+                            opf_text = re.sub(r'(<manifest[^>]*>)', rf'\1\n{item_tag}', opf_text)
+
+            # Update MathML property if math is present
+            if has_math:
                 for xf in xhtml_files:
                     pattern = rf'(<item [^>]*href=[\'"]{re.escape(xf.name)}[\'"][^>]*)>'
                     def add_mathml_prop(m):
@@ -436,7 +510,8 @@ def postprocess_epub_xhtml(
                             return re.sub(r'properties=[\'"]([^\'"]*)[\'"]', r'properties="\1 mathml"', tag) + '>'
                         return m.group(0)
                     opf_text = re.sub(pattern, add_mathml_prop, opf_text)
-                opf.write_text(opf_text, encoding="utf-8")
+
+            opf_p.write_text(opf_text, encoding="utf-8")
 
         # 4. Repack EPUB
         repack_epub(root_p, dst)
@@ -518,24 +593,24 @@ def convert_via_tex4ebook(
 
         shutil.move(str(produced[0]), str(output_epub))
 
-    # Strip any heavy font declarations
-    try:
-        sanitize_epub_fonts(output_epub)
-    except Exception:
-        pass
-
-    # Merge sections into single flow if requested
-    if flow_mode == "single":
+        # Strip any heavy font declarations
         try:
-            merge_epub_to_single_flow(output_epub)
+            sanitize_epub_fonts(output_epub)
         except Exception:
             pass
 
-    # Post-process EPUB for MathML namespaces, responsive images, and clean typography
-    try:
-        postprocess_epub_xhtml(output_epub)
-    except Exception:
-        pass
+        # Merge sections into single flow if requested
+        if flow_mode == "single":
+            try:
+                merge_epub_to_single_flow(output_epub)
+            except Exception:
+                pass
+
+        # Post-process EPUB for MathML namespaces, responsive images, and clean typography
+        try:
+            postprocess_epub_xhtml(output_epub, assets_dir=[src_tmp_dir, tex_path.parent])
+        except Exception:
+            pass
 
     return {
         "success": True,
@@ -604,7 +679,7 @@ def convert_via_make4ht(
         )
 
         try:
-            postprocess_epub_xhtml(output_epub)
+            postprocess_epub_xhtml(output_epub, assets_dir=[figs_dir, tmp_p, tex_path.parent])
         except Exception:
             pass
 
