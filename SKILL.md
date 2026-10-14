@@ -5,32 +5,49 @@ description: Converts PDF documents, Word files (DOCX/ODT), LaTeX (TeX), PowerPo
 
 # PDF to EPUB Converter Skill
 
-A vision-first, parallel multi-agent skill for converting complex PDF documents (academic papers, textbooks, manuals, novels) into clean, reflowable **EPUB3** ebooks and **Markdown**.
+An **agentic, vision-first skill** where the **LLM guides the entire conversion process** through intelligent Document Layout Analysis (DLA), dynamic chunk-by-chunk decision making, and tool calling.
+This is **NOT a monolithic script or external vision API client**—the LLM itself performs reconnaissance, decides the appropriate extraction strategy for each chunk, calls tools (`collage_maker.py`, `view_file`, `invoke_subagent`, `ask_question`), and directly writes the EPUB3 ebook.
 
 ---
 
 ## Core Architecture & Principles
 
-1. **Portable & Repository-Agnostic**: Self-contained within `~/.gemini/config/skills/pdf-to-epub/`. Does not depend on external frameworks or specific repository setups.
-2. **Direct EPUB3 Writing (Zero Intermediate LaTeX Staging)**:
+1. **LLM as the Conversion Orchestrator**:
+   - The LLM does not delegate blindly to a rigid black-box script.
+   - The LLM guides the workflow: performs DLA, inspects visual collages via `view_file`, breaks the document into logical chunks, and dynamically selects the best tool calls for each chunk.
+2. **Chunk-by-Chunk Decision & Tool Calling Loop**:
+   For **each page block / chunk**, the LLM inspects the layout and decides:
+   - **Scanned Text (Non-Digital / Degraded Image Pages)**:
+     - The LLM **MUST ASK THE USER** via `ask_question`:
+       - Option 1: `(Recommended) Use LLM Vision tools (Spawn subagent of this LLM to inspect page images via view_file for high-accuracy OCR)`
+       - Option 2: `Use Tesseract OCR (Fast local processing)`
+     - If user selects Vision tools: The LLM invokes a subagent (`invoke_subagent`), which calls `view_file` on the page image to read and transcribe with its native multimodal vision ability.
+     - If user selects Tesseract: The LLM runs local Tesseract OCR via `run_command`.
+   - **Handwritten Content**:
+     - If a chunk contains handwritten notes, equations, whiteboard diagrams, or margin sketches:
+     - The LLM **MUST use its vision tools for the crop**:
+       - Tool call `collage_maker.py crop <pdf> --page <P> --coords "<ymin,xmin,ymax,xmax>" -o figures/handwritten_p<P>_<N>.png`.
+       - Tool call `view_file` (or invoke a vision subagent) to view the cropped image and transcribe the handwriting accurately into LaTeX math `$..$` / `$$..$$`, or embed the high-res crop as a clean figure.
+   - **Digital Text & Tables**:
+     - Extracts text flow, resolves columns, de-hyphenates line wraps, formats Markdown tables.
+   - **Diagrams & Vector Graphics**:
+     - Tool call `collage_maker.py crop` to extract PNG figures into `figures/`.
+3. **Direct EPUB3 Writing (Zero Intermediate LaTeX Staging)**:
    - When converting from PDF to EPUB, **NEVER** use an intermediate `PDF -> LaTeX (.tex) -> EPUB` compilation stage (e.g. generating `.tex` documents or invoking `tex4ebook`/`make4ht`).
    - Directly extract layout, semantic text, tables, and cropped figures into reflowable Markdown/XHTML, convert math notation directly into native W3C MathML, and package directly into valid EPUB3 via `epub_packager.py`.
-3. **Adaptive Visual Grid Sampling (Collage Probing)**:
+4. **Adaptive Visual Grid Sampling (Collage Probing)**:
    - Probes page density starting with **3x3** (9 pages/view) -> **3x2** (6 widescreen 16:9 slides/view) -> **2x2** (4 pages/view) -> **1x1** (single-page high resolution).
    - **3x2 Widescreen Grid (Optimal for Slide Decks)**:
      - Arranges 6 widescreen (16:9) slides 3 columns across by 2 rows down ($48:18$ / $8:3$ aspect ratio).
      - Because lecture presentation fonts are large (20–36pt), rendering at 120–140 DPI preserves 100% legibility of all mathematical sub/superscripts and matrix entries while saving 33% on token costs and subagent roundtrips compared to 2x2.
      - **Slide Unhiding**: Automatically unhides slides marked `show="0"` before headless LibreOffice export, guaranteeing strict 1:1 slide-to-page alignment with zero drift.
    - Determines the highest page density that allows 100% reliable text, diagram, and equation reading.
-4. **Hierarchical Range Partitioning with Parallel Subagents**:
+5. **Hierarchical Range Partitioning with Parallel Subagents**:
    - The **Coordinator Agent** probes resolution, scans the Table of Contents (TOC), partitions the document into balanced page blocks, and dispatches parallel worker subagents using `invoke_subagent`.
-   - **Worker Subagents** process their assigned page blocks concurrently using multimodal vision capabilities.
-5. **Hybrid Math & Visual Asset Strategy**:
+   - **Worker Subagents** process their assigned page blocks concurrently using their native multimodal vision capabilities.
+6. **Hybrid Math & Visual Asset Strategy**:
    - **Direct MathML**: Transcribes clean inline (`$...$`) and display (`$$...$$`) math formulas in standard notation, compiled directly into native W3C MathML (`<math>`) for reflowable e-reader typography (zero `.tex` document compiling).
    - **Visual Fallback**: Crops high-resolution images (`[ymin, xmin, ymax, xmax]`) for complex chemical diagrams, commutative diagrams, intricate charts, and dense figures.
-   - **Handwritten Content**: If content is handwritten (notes, equations, margin annotations, sketches), **MUST use LLM's vision tools for the crop**. Crop the exact bounding box at high resolution and route through multimodal LLM vision to transcribe or cleanly embed. Never pass handwriting to Tesseract or plain OCR.
-6. **Scanned Text Policy (Mandatory User Choice)**:
-   - When scanned or rasterized pages without digital text are detected, the agent **MUST ASK THE USER** via `ask_question` whether to use **Tesseract (local fast OCR)** or **Vision Tools (multimodal LLM transcription)** before proceeding.
 7. **Structured Header Event Log & State Machine Stack**:
    - Workers emit Markdown along with structured event tags for headings, container openings/closings, and cross-page paragraph cuts.
    - Coordinator reconciles the global hierarchy stack, stitches split sentences across page boundaries, and generates the EPUB Table of Contents.
@@ -386,7 +403,11 @@ You are a PDF-to-EPUB conversion worker responsible for Pages {START} to {END} o
 1. Render your pages using the agreed grid resolution:
    python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py collage "{PDF_PATH}" --start {START} --end {END} --grid {GRID} -o "/tmp/batch_{START}_{END}.png" --dpi 140
 
-2. View the generated collage image. Read all text in natural reading order (handle multi-column layout properly).
+2. View the generated collage image using `view_file` tool to inspect the content with your native multimodal vision ability. Read all text in natural reading order (handle multi-column layout properly).
+   - If pages are scanned text: Use your multimodal vision to transcribe all body text, headings, and tables accurately into Markdown.
+   - If content is handwritten: MUST use vision tools for the crop: locate bounding box `[ymin, xmin, ymax, xmax]`, run:
+     python3 ~/.gemini/config/skills/pdf-to-epub/scripts/collage_maker.py crop "{PDF_PATH}" --page <P> --coords "ymin,xmin,ymax,xmax" -o "figures/fig_handwritten_p<P>_<N>.png"
+     Then view the cropped image with `view_file` and transcribe into LaTeX math ($...$ or $$...$$) or embed as a clean figure.
    - Strip headers, footers, and page numbers.
    - Format standard formulas as LaTeX: $...$ for inline, $$...$$ for display blocks.
    - For all figures, plots, diagrams, or dense equations, crop them using:
