@@ -206,9 +206,11 @@ For complex, multi-column, or scanned PDFs, the suite uses vision-first adaptive
 >
 > **Handwritten Content**: If content is handwritten (notes, equations, margin annotations, sketches), **MUST use LLM's vision tools for the crop** (crop bounding box at high resolution via `collage_maker.py crop`, inspect via `view_file`, and transcribe into LaTeX math or embed as clean figures).
 >
-> **Scanned Text**: If scanned text / rasterized pages are detected, **MUST ask the user** (via `ask_question`) whether to use:
-> 1. Tesseract OCR (Fast local CLI extraction)
-> 2. LLM Vision Tools (Spawn subagents of this LLM to view the pages with their native multimodal vision for high-fidelity OCR).
+> **Scanned Text & Collage Token Optimization**: If scanned text / rasterized pages are detected, **MUST ask the user** (via `ask_question`) whether to use:
+> 1. LLM Vision Tools with Collage Grids (Saves tokens by grouping 2x2/3x3 pages per view)
+> 2. LLM Vision Tools (Single-page 1x1 high resolution)
+> 3. Tesseract OCR (Fast local CLI extraction).
+> During scanning, the LLM and subagents **may collage pages if the user permits to save tokens** and reduce LLM roundtrips.
 
 ### Adaptive Grid Probing
 

@@ -19,9 +19,11 @@ This is **NOT a monolithic script or external vision API client**—the LLM itse
    For **each page block / chunk**, the LLM inspects the layout and decides:
    - **Scanned Text (Non-Digital / Degraded Image Pages)**:
      - The LLM **MUST ASK THE USER** via `ask_question`:
-       - Option 1: `(Recommended) Use LLM Vision tools (Spawn subagent of this LLM to inspect page images via view_file for high-accuracy OCR)`
-       - Option 2: `Use Tesseract OCR (Fast local processing)`
-     - If user selects Vision tools: The LLM invokes a subagent (`invoke_subagent`), which calls `view_file` on the page image to read and transcribe with its native multimodal vision ability.
+       - Option 1: `(Recommended) Use LLM Vision tools with Collage Grids (Saves tokens by grouping 2x2/3x3 pages per view)`
+       - Option 2: `Use LLM Vision tools (Single-page 1x1 high resolution)`
+       - Option 3: `Use Tesseract OCR (Fast local CLI processing)`
+     - **Collage to Save Tokens**: During the scanning/OCR process, the LLM and subagents **may collage pages (e.g. 2x2 or 3x3 grids via `collage_maker.py collage`) if the user permits to save tokens** and reduce subagent roundtrips, provided legibility is maintained.
+     - If user selects Vision tools: The LLM invokes a subagent (`invoke_subagent`), which calls `view_file` on the page image/collage to read and transcribe with its native multimodal vision ability.
      - If user selects Tesseract: The LLM runs local Tesseract OCR via `run_command`.
    - **Handwritten Content**:
      - If a chunk contains handwritten notes, equations, whiteboard diagrams, or margin sketches:
@@ -292,8 +294,10 @@ flowchart TD
 4. **Scanned Text & OCR Engine Selection (User Choice)**:
    - Check if pages are scanned raster images without digital text.
    - If scanned text is detected, **MUST ASK THE USER** via `ask_question`:
-     - Option 1: `(Recommended) Use LLM Vision tools (High accuracy for complex layouts, formulas, and degraded text)`
-     - Option 2: `Use Tesseract OCR (Fast local processing)`
+     - Option 1: `(Recommended) Use LLM Vision tools with Collage Grids (Saves tokens by grouping 2x2/3x3 pages per view)`
+     - Option 2: `Use LLM Vision tools (Single-page 1x1 high resolution)`
+     - Option 3: `Use Tesseract OCR (Fast local CLI processing)`
+   - **Collage Token Optimization**: If the user permits, workers may generate 2x2 or 3x3 collages during vision OCR to significantly cut vision token costs and subagent roundtrips.
 5. **Handwritten Content Detection**:
    - Inspect probe collages for handwritten text, formulas, or annotations.
    - Flag any handwritten regions so workers know they **must use LLM vision tools for the crop**.
