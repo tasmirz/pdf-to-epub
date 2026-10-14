@@ -199,6 +199,9 @@ pdf-to-epub html2epub ch1.html ch2.html ch3.html -o book.epub --title "User Guid
 
 For complex, multi-column, or scanned PDFs, the suite uses vision-first adaptive collage probing and parallel subagents.
 
+> [!IMPORTANT]
+> **Zero Intermediate LaTeX**: When converting from PDF to EPUB, never stage through an intermediate `.tex` document or invoke TeX compilers (`tex4ebook`, `make4ht`, `pdflatex`). Directly write and package the EPUB file using `epub_packager.py`.
+
 ### Adaptive Grid Probing
 
 ```bash

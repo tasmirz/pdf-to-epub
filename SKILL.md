@@ -12,20 +12,23 @@ A vision-first, parallel multi-agent skill for converting complex PDF documents 
 ## Core Architecture & Principles
 
 1. **Portable & Repository-Agnostic**: Self-contained within `~/.gemini/config/skills/pdf-to-epub/`. Does not depend on external frameworks or specific repository setups.
-2. **Adaptive Visual Grid Sampling (Collage Probing)**:
+2. **Direct EPUB3 Writing (Zero Intermediate LaTeX Staging)**:
+   - When converting from PDF to EPUB, **NEVER** use an intermediate `PDF -> LaTeX (.tex) -> EPUB` compilation stage (e.g. generating `.tex` documents or invoking `tex4ebook`/`make4ht`).
+   - Directly extract layout, semantic text, tables, and cropped figures into reflowable Markdown/XHTML, convert math notation directly into native W3C MathML, and package directly into valid EPUB3 via `epub_packager.py`.
+3. **Adaptive Visual Grid Sampling (Collage Probing)**:
    - Probes page density starting with **3x3** (9 pages/view) -> **3x2** (6 widescreen 16:9 slides/view) -> **2x2** (4 pages/view) -> **1x1** (single-page high resolution).
    - **3x2 Widescreen Grid (Optimal for Slide Decks)**:
      - Arranges 6 widescreen (16:9) slides 3 columns across by 2 rows down ($48:18$ / $8:3$ aspect ratio).
      - Because lecture presentation fonts are large (20–36pt), rendering at 120–140 DPI preserves 100% legibility of all mathematical sub/superscripts and matrix entries while saving 33% on token costs and subagent roundtrips compared to 2x2.
      - **Slide Unhiding**: Automatically unhides slides marked `show="0"` before headless LibreOffice export, guaranteeing strict 1:1 slide-to-page alignment with zero drift.
    - Determines the highest page density that allows 100% reliable text, diagram, and equation reading.
-3. **Hierarchical Range Partitioning with Parallel Subagents**:
+4. **Hierarchical Range Partitioning with Parallel Subagents**:
    - The **Coordinator Agent** probes resolution, scans the Table of Contents (TOC), partitions the document into balanced page blocks, and dispatches parallel worker subagents using `invoke_subagent`.
    - **Worker Subagents** process their assigned page blocks concurrently using multimodal vision capabilities.
-4. **Hybrid Math & Visual Asset Strategy**:
-   - **LaTeX-First**: Transcribes clean inline (`$...$`) and display (`$$...$$`) math formulas into LaTeX for reflowable e-reader typography.
+5. **Hybrid Math & Visual Asset Strategy**:
+   - **Direct MathML**: Transcribes clean inline (`$...$`) and display (`$$...$$`) math formulas in standard notation, compiled directly into native W3C MathML (`<math>`) for reflowable e-reader typography (zero `.tex` document compiling).
    - **Visual Fallback**: Crops high-resolution images (`[ymin, xmin, ymax, xmax]`) for complex chemical diagrams, commutative diagrams, intricate charts, dense figures, and ambiguous handwritten formulas.
-5. **Structured Header Event Log & State Machine Stack**:
+6. **Structured Header Event Log & State Machine Stack**:
    - Workers emit Markdown along with structured event tags for headings, container openings/closings, and cross-page paragraph cuts.
    - Coordinator reconciles the global hierarchy stack, stitches split sentences across page boundaries, and generates the EPUB Table of Contents.
 
@@ -248,6 +251,9 @@ flowchart TD
     H --> I["Compile EPUB3 Container (epub_packager.py)"]
     I --> J["Final Reflowable EPUB + Markdown Deliverable"]
 ```
+
+> [!IMPORTANT]
+> **Zero Intermediate LaTeX**: When converting from PDF to EPUB, never stage through an intermediate `.tex` document or invoke TeX compilers (`tex4ebook`, `make4ht`, `pdflatex`). Directly write and package the EPUB file using `epub_packager.py`.
 
 ### Stage 1: Document Reconnaissance & Grid Probing
 
