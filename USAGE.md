@@ -201,6 +201,10 @@ For complex, multi-column, or scanned PDFs, the suite uses vision-first adaptive
 
 > [!IMPORTANT]
 > **Zero Intermediate LaTeX**: When converting from PDF to EPUB, never stage through an intermediate `.tex` document or invoke TeX compilers (`tex4ebook`, `make4ht`, `pdflatex`). Directly write and package the EPUB file using `epub_packager.py`.
+>
+> **Handwritten Content**: If content is handwritten (notes, equations, margin annotations, sketches), **MUST use LLM's vision tools for the crop** (crop bounding box at high resolution and route to multimodal vision LLM).
+>
+> **Scanned Text**: If scanned text / rasterized pages are detected, **MUST ask the user** whether to use Tesseract (local fast OCR) or Vision tools (multimodal AI transcription) before proceeding.
 
 ### Adaptive Grid Probing
 

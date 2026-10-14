@@ -35,6 +35,7 @@ class ElementType(Enum):
     DIAGRAM_IMAGE = "diagram_image"
     EQUATION_BLOCK = "equation_block"
     TRANSCRIBE_CANDIDATE = "transcribe_candidate"
+    HANDWRITTEN = "handwritten"
     SPEAKER_NOTE = "speaker_note"
 
 
@@ -43,6 +44,7 @@ class ActionType(Enum):
     EMBED_FIGURE = "embed_figure"
     TRANSCRIBE_LATEX = "transcribe_latex"
     TRANSCRIBE_VISION = "transcribe_vision"
+    CROP_VISION = "crop_vision"
     FILTER_OUT = "filter_out"
 
 

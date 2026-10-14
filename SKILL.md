@@ -27,8 +27,11 @@ A vision-first, parallel multi-agent skill for converting complex PDF documents 
    - **Worker Subagents** process their assigned page blocks concurrently using multimodal vision capabilities.
 5. **Hybrid Math & Visual Asset Strategy**:
    - **Direct MathML**: Transcribes clean inline (`$...$`) and display (`$$...$$`) math formulas in standard notation, compiled directly into native W3C MathML (`<math>`) for reflowable e-reader typography (zero `.tex` document compiling).
-   - **Visual Fallback**: Crops high-resolution images (`[ymin, xmin, ymax, xmax]`) for complex chemical diagrams, commutative diagrams, intricate charts, dense figures, and ambiguous handwritten formulas.
-6. **Structured Header Event Log & State Machine Stack**:
+   - **Visual Fallback**: Crops high-resolution images (`[ymin, xmin, ymax, xmax]`) for complex chemical diagrams, commutative diagrams, intricate charts, and dense figures.
+   - **Handwritten Content**: If content is handwritten (notes, equations, margin annotations, sketches), **MUST use LLM's vision tools for the crop**. Crop the exact bounding box at high resolution and route through multimodal LLM vision to transcribe or cleanly embed. Never pass handwriting to Tesseract or plain OCR.
+6. **Scanned Text Policy (Mandatory User Choice)**:
+   - When scanned or rasterized pages without digital text are detected, the agent **MUST ASK THE USER** via `ask_question` whether to use **Tesseract (local fast OCR)** or **Vision Tools (multimodal LLM transcription)** before proceeding.
+7. **Structured Header Event Log & State Machine Stack**:
    - Workers emit Markdown along with structured event tags for headings, container openings/closings, and cross-page paragraph cuts.
    - Coordinator reconciles the global hierarchy stack, stitches split sentences across page boundaries, and generates the EPUB Table of Contents.
 
@@ -269,6 +272,14 @@ flowchart TD
 3. **Detect Table of Contents & Major Divisions**:
    - Check pages 1–5 for an explicit Table of Contents or chapter listing.
    - Note major structural divisions to guide block partitioning.
+4. **Scanned Text & OCR Engine Selection (User Choice)**:
+   - Check if pages are scanned raster images without digital text.
+   - If scanned text is detected, **MUST ASK THE USER** via `ask_question`:
+     - Option 1: `(Recommended) Use LLM Vision tools (High accuracy for complex layouts, formulas, and degraded text)`
+     - Option 2: `Use Tesseract OCR (Fast local processing)`
+5. **Handwritten Content Detection**:
+   - Inspect probe collages for handwritten text, formulas, or annotations.
+   - Flag any handwritten regions so workers know they **must use LLM vision tools for the crop**.
 
 ---
 
@@ -308,8 +319,9 @@ Each worker follows this strict workflow:
    - Identify multi-column flow (read left column top-to-bottom, then right column).
    - Strip running headers, footers, and floating page numbers.
    - De-hyphenate line-wrapped words (e.g. `distri-` + `buted` -> `distributed`), but preserve real compound words.
-3. **Hybrid Math & Figure Extraction**:
-   - Standard formulas: write as LaTeX (`$...$` or `$$...$$`).
+3. **Hybrid Math & Figure Extraction (Mandatory Vision Crop for Handwriting)**:
+   - **Handwritten text & equations**: **MUST use LLM vision tools for the crop**. Locate bounding box `[ymin, xmin, ymax, xmax]`, run `collage_maker.py crop <pdf> --page <P> --coords "<coords>" -o "figures/fig_handwritten_p<P>_<N>.png"`, and transcribe using Multimodal LLM Vision or embed as a clean figure.
+   - Standard formulas: write as LaTeX (`$...$` or `$$...$$`) for direct MathML rendering.
    - Diagrams, charts, plots, complex architecture diagrams:
      - Determine bounding box `[ymin, xmin, ymax, xmax]` (0–1000 scale).
      - Run `collage_maker.py crop <pdf> --page <P> --coords "<coords>" -o "figures/fig_p<P>_<N>.png"`.
